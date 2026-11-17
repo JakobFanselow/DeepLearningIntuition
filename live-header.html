@@ -1,0 +1,315 @@
+<style>
+  .reveal .slides section h2 { font-size: 1.3em; margin: 0 0 .4em; }
+
+  .live-cell {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 24px;
+    align-items: start;
+    width: 100%;
+  }
+  .live-left { min-width: 0; }
+
+  .reveal .live-left div.sourceCode,
+  .reveal .live-left pre { margin: 0; width: 100%; box-shadow: none; }
+  .reveal .live-left pre { max-height: 640px; overflow: auto; }
+  .reveal .live-left pre code {
+    max-height: 640px !important;
+    font-size: 15px;
+    line-height: 1.35;
+    outline: none;
+    padding: 12px;
+  }
+  .reveal [data-live] code:focus { box-shadow: 0 0 0 2px #00e0e0; }
+
+  .live-bar { display: flex; gap: 12px; align-items: center; font-size: 16px; margin: 10px 0 0; }
+  .live-bar button {
+    background: #00e0e0; color: #000; border: 0; border-radius: 4px;
+    padding: 6px 16px; cursor: pointer; font-weight: bold; font-size: inherit;
+  }
+  .live-bar button:disabled { opacity: .6; cursor: wait; }
+  .live-bar .hint { opacity: .6; }
+
+  .live-out {
+    font-family: monospace; font-size: 17px; line-height: 1.4;
+    text-align: left; white-space: pre-wrap;
+    background: #111; border-radius: 4px; padding: 10px;
+    max-height: 760px; overflow: auto; min-width: 0;
+  }
+  .live-out:empty { display: none; }
+  .live-out img {
+    display: block; max-width: 100%; max-height: 600px;
+    width: auto; height: auto; object-fit: contain; background: #fff;
+  }
+  .live-out .err { color: #f07178; }
+
+  /* sliders */
+  .live-sliders { margin-top: 12px; display: grid; gap: 8px; }
+  .live-slider {
+    display: grid; grid-template-columns: 110px 1fr 70px;
+    gap: 12px; align-items: center; font-size: 18px;
+  }
+  .live-slider input[type=range] { width: 100%; accent-color: #00e0e0; cursor: pointer; }
+  .live-slider .val { text-align: right; color: #00e0e0; }
+</style>
+
+<script>
+(() => {
+  const HOST = "127.0.0.1:8888";
+  const TOKEN = "slides-secret";   // must match SLIDES_TOKEN in the flake
+
+  // Runs once in each new kernel; defines live_sliders() for slide code.
+  const PRELUDE = `
+import io, base64, json, uuid
+from IPython.display import display
+import matplotlib.pyplot as plt
+
+_LIVE = {}
+
+def _png(fig, dpi=80):
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=dpi)
+    return base64.b64encode(buf.getvalue()).decode()
+
+def live_sliders(fig, update, **sliders):
+    """sliders: name=(min, max, start, step). update(**values) mutates fig."""
+    sid = uuid.uuid4().hex
+    _LIVE[sid] = (fig, update)
+    plt.close(fig)   # keep the object, stop the inline backend auto-showing it
+    update(**{k: v[2] for k, v in sliders.items()})
+    spec = [dict(name=k, min=v[0], max=v[1], value=v[2], step=v[3])
+            for k, v in sliders.items()]
+    display({"application/x-live": {"id": sid, "sliders": spec, "frame": _png(fig)}}, raw=True)
+
+def _live_call(sid, payload):
+    fig, update = _LIVE[sid]
+    update(**json.loads(payload))
+    display({"application/x-live-frame": _png(fig)}, raw=True)
+`;
+
+  const pending = new Map();
+  let kernelP = null;
+
+  const uid = () => Math.random().toString(36).slice(2) + Date.now().toString(36);
+  const stripAnsi = (s) => s.replace(/\x1b\[[0-9;]*m/g, "");
+
+  // Send code to the kernel; onMsg sees every message; resolves when idle.
+  function exec(ws, code, onMsg, silent = false) {
+    const id = uid();
+    return new Promise((done) => {
+      pending.set(id, (m) => {
+        onMsg(m);
+        if (m.header.msg_type === "status" && m.content.execution_state === "idle") {
+          pending.delete(id);
+          done();
+        }
+      });
+      ws.send(JSON.stringify({
+        header: { msg_id: id, username: "", session: id, msg_type: "execute_request", version: "5.3" },
+        parent_header: {}, metadata: {}, buffers: [], channel: "shell",
+        content: { code, silent, store_history: !silent, user_expressions: {},
+                   allow_stdin: false, stop_on_error: true },
+      }));
+    });
+  }
+
+  function startKernel() {
+    if (!kernelP) {
+      kernelP = (async () => {
+        const r = await fetch(`http://${HOST}/api/kernels?token=${TOKEN}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: "python3" }),
+        });
+        if (!r.ok) throw new Error(`Kernel start failed: HTTP ${r.status}`);
+        const k = await r.json();
+        const ws = new WebSocket(`ws://${HOST}/api/kernels/${k.id}/channels?token=${TOKEN}`);
+        await new Promise((res, rej) => {
+          ws.onopen = res;
+          ws.onerror = () => rej(new Error("WebSocket connection failed"));
+        });
+        ws.onmessage = (ev) => {
+          const m = JSON.parse(ev.data);
+          const h = pending.get(m.parent_header && m.parent_header.msg_id);
+          if (h) h(m);
+        };
+        await exec(ws, PRELUDE, () => {}, true);   // install live_sliders()
+        return ws;
+      })();
+      kernelP.catch(() => { kernelP = null; });
+    }
+    return kernelP;
+  }
+
+  // Build image + HTML sliders; slider moves re-render in the kernel.
+  function renderLive(out, ws, spec) {
+    const wrap = document.createElement("div");
+    const img = new Image();
+    img.src = "data:image/png;base64," + spec.frame;
+    wrap.appendChild(img);
+
+    const values = {};
+    let busy = false, dirty = false;
+
+    const refresh = async () => {
+      if (busy) { dirty = true; return; }
+      busy = true;
+      try {
+        do {
+          dirty = false;
+          const payload = JSON.stringify(JSON.stringify(values));
+          const call = `_live_call(${JSON.stringify(spec.id)}, ${payload})`;
+          await exec(ws, call, (m) => {
+            const c = m.content;
+            if (m.header.msg_type === "display_data" && c.data["application/x-live-frame"]) {
+              img.src = "data:image/png;base64," + c.data["application/x-live-frame"];
+            } else if (m.header.msg_type === "error") {
+              const s = document.createElement("span");
+              s.className = "err";
+              s.textContent = stripAnsi(c.traceback.join("\n")) + "\n";
+              wrap.appendChild(s);
+            }
+          }, true);
+        } while (dirty);
+      } finally { busy = false; }
+    };
+
+    const box = document.createElement("div");
+    box.className = "live-sliders";
+    for (const s of spec.sliders) {
+      values[s.name] = s.value;
+      const row = document.createElement("div");
+      row.className = "live-slider";
+      const label = document.createElement("span");
+      label.textContent = s.name;
+      const input = document.createElement("input");
+      input.type = "range";
+      input.min = s.min; input.max = s.max; input.step = s.step; input.value = s.value;
+      const val = document.createElement("span");
+      val.className = "val";
+      val.textContent = Number(s.value).toFixed(2);
+      input.addEventListener("input", () => {
+        values[s.name] = parseFloat(input.value);
+        val.textContent = values[s.name].toFixed(2);
+        refresh();
+      });
+      // don't let Reveal grab arrow keys while a slider is focused
+      for (const ev of ["keydown", "keyup", "keypress"]) {
+        input.addEventListener(ev, (e) => e.stopPropagation());
+      }
+      row.append(label, input, val);
+      box.appendChild(row);
+    }
+    wrap.appendChild(box);
+    out.appendChild(wrap);
+  }
+
+  async function run(code, out) {
+    out.replaceChildren();
+    const add = (cls, text) => {
+      const s = document.createElement("span");
+      if (cls) s.className = cls;
+      s.textContent = text;
+      out.appendChild(s);
+    };
+    let ws;
+    try { ws = await startKernel(); }
+    catch (e) { add("err", String(e) + "\nIs `kernel-server` running?"); return; }
+
+    await exec(ws, code, (m) => {
+      const c = m.content;
+      switch (m.header.msg_type) {
+        case "stream": add("", c.text); break;
+        case "execute_result":
+        case "display_data":
+          if (c.data["application/x-live"]) {
+            renderLive(out, ws, c.data["application/x-live"]);
+          } else if (c.data["image/png"]) {
+            const img = new Image();
+            img.src = "data:image/png;base64," + c.data["image/png"];
+            out.appendChild(img);
+          } else if (c.data["text/plain"]) {
+            add("", c.data["text/plain"] + "\n");
+          }
+          break;
+        case "error": add("err", stripAnsi(c.traceback.join("\n")) + "\n"); break;
+      }
+    });
+  }
+
+  function setup() {
+    const autorun = [];
+
+    document.querySelectorAll("[data-live]").forEach((block) => {
+      const code = block.querySelector("code");
+      const anchor = block.closest(".code-copy-outer-scaffold") || block;
+
+      code.contentEditable = "plaintext-only";
+      if (code.contentEditable !== "plaintext-only") code.contentEditable = "true";
+      code.spellcheck = false;
+      code.addEventListener("focus", () => { code.textContent = code.textContent; }, { once: true });
+
+      const bar = document.createElement("div");
+      bar.className = "live-bar";
+      const btn = document.createElement("button");
+      btn.textContent = "▶ Run";
+      const hint = document.createElement("span");
+      hint.className = "hint";
+      hint.textContent = "Shift+Enter";
+      bar.append(btn, hint);
+
+      const out = document.createElement("div");
+      out.className = "live-out";
+
+      const cell = document.createElement("div");
+      cell.className = "live-cell";
+      // optional: data-out-ratio="1.8" gives the output pane more width
+      const ratio = block.dataset.outRatio;
+      if (ratio) cell.style.gridTemplateColumns = `minmax(0, 1fr) minmax(0, ${ratio}fr)`;
+      const left = document.createElement("div");
+      left.className = "live-left";
+      anchor.before(cell);
+      left.append(anchor, bar);
+      cell.append(left, out);
+
+      const go = async () => {
+        btn.disabled = true; btn.textContent = "… running";
+        try { await run(code.textContent, out); }
+        finally { btn.disabled = false; btn.textContent = "▶ Run"; }
+      };
+      btn.addEventListener("click", go);
+
+      for (const ev of ["keydown", "keypress", "keyup"]) {
+        code.addEventListener(ev, (e) => e.stopPropagation());
+      }
+      code.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" && (e.shiftKey || e.ctrlKey)) { e.preventDefault(); go(); }
+        else if (e.key === "Tab") { e.preventDefault(); document.execCommand("insertText", false, "    "); }
+        else if (e.key === "Escape") { code.blur(); }
+      });
+
+      if (block.dataset.autorun === "true" ||
+          block.closest("[data-autorun]") ||
+          code.closest("pre")?.dataset.autorun === "true") {
+        autorun.push({ section: block.closest("section"), go, done: false });
+      }
+    });
+
+    const runVisible = () => {
+      const current = window.Reveal && Reveal.getCurrentSlide && Reveal.getCurrentSlide();
+      autorun.forEach((a) => {
+        if (!a.done && a.section === current) { a.done = true; a.go(); }
+      });
+    };
+
+    if (window.Reveal) {
+      Reveal.on("slidechanged", runVisible);
+      Reveal.on("ready", runVisible);
+      if (Reveal.layout) Reveal.layout();
+      if (Reveal.isReady && Reveal.isReady()) runVisible();
+    }
+  }
+
+  document.addEventListener("DOMContentLoaded", setup);
+})();
+</script>

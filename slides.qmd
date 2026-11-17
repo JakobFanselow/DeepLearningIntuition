@@ -1,0 +1,335 @@
+---
+title: "ML Demo"
+author: "You"
+format:
+  revealjs:
+    theme: dark
+    slide-number: true
+    width: 1600
+    height: 900
+    margin: 0.03
+    center: false
+    include-in-header: live-header.html
+---
+
+## Data appears to have a trend
+
+```{.python data-live="true" data-autorun="true"}
+import torch, torch.nn as nn
+import matplotlib.pyplot as plt
+
+num_datapoints = 25
+
+torch.manual_seed(0)
+
+true_w, true_b = 2.0, 1.0
+x = torch.rand(num_datapoints, 1) * 10
+y = true_w * x + true_b + torch.randn_like(x) * 2.0
+
+plt.figure(figsize=(8, 6))
+
+plt.scatter(x.numpy(), y.numpy(), color='royalblue', alpha=0.7, edgecolors='k', label='Data Points')
+
+plt.xlabel('x', fontsize=12)
+plt.ylabel('y', fontsize=12)
+plt.legend(fontsize=11)
+plt.grid(True, linestyle='--', alpha=0.6)
+plt.tight_layout()
+plt.show()
+```
+
+## Let's put a line over the data
+
+```{.python data-live="true"}
+import torch, torch.nn as nn
+import matplotlib.pyplot as plt
+
+torch.manual_seed(0)
+
+true_w, true_b = 2.0, 1.0
+x = torch.rand(num_datapoints, 1) * 10
+y = true_w * x + true_b + torch.randn_like(x) * 2.0
+
+plt.figure(figsize=(8, 6))
+
+plt.scatter(x.numpy(), y.numpy(), color='royalblue', alpha=0.7, edgecolors='k', label='Data Points')
+
+x_line = torch.linspace(0, 10, 100).unsqueeze(1)
+y_line = (true_w+0.05) * (x_line) + (true_b)
+plt.plot(x_line.numpy(), y_line.numpy(), color='crimson', linewidth=2.5, label=f'Line')
+
+
+
+plt.xlabel('x', fontsize=12)
+plt.ylabel('y', fontsize=12)
+plt.legend(fontsize=11)
+plt.grid(True, linestyle='--', alpha=0.6)
+plt.tight_layout()
+plt.show()
+```
+
+## What about other lines?
+
+```{.python data-live="true"}
+import torch, torch.nn as nn
+import matplotlib.pyplot as plt
+
+torch.manual_seed(0)
+
+true_w, true_b = 2.0, 1.0
+x = torch.rand(num_datapoints, 1) * 10
+y = true_w * x + true_b + torch.randn_like(x) * 2.0
+
+plt.figure(figsize=(8, 6))
+
+plt.scatter(x.numpy(), y.numpy(), color='royalblue', alpha=0.7, edgecolors='k', label='Data Points')
+
+x_line = torch.linspace(0, 10, 100).unsqueeze(1)
+y_line = (true_w+0.05) * (x_line) + (true_b)
+plt.plot(x_line.numpy(), y_line.numpy(), color='crimson', linewidth=2.5, label=f'Line 1')
+
+x_line = torch.linspace(0, 10, 100).unsqueeze(1)
+y_line = (true_w-0.1) * (x_line) + (true_b+0.8)
+plt.plot(x_line.numpy(), y_line.numpy(), color='green', linewidth=2.5, label=f'Line 2')
+
+
+
+plt.xlabel('x', fontsize=12)
+plt.ylabel('y', fontsize=12)
+plt.legend(fontsize=11)
+plt.grid(True, linestyle='--', alpha=0.6)
+plt.tight_layout()
+plt.show()
+```
+
+## Is one better than the other? How can we compare them?
+
+```{.python data-live="true" data-autorun="true"}
+import torch, torch.nn as nn
+import matplotlib.pyplot as plt
+
+torch.manual_seed(0)
+
+true_w, true_b = 2.0, 1.0
+x = torch.rand(num_datapoints, 1) * 10
+y = true_w * x + true_b + torch.randn_like(x) * 2.0
+
+plt.figure(figsize=(8, 6))
+
+plt.scatter(x.numpy(), y.numpy(), color='royalblue', alpha=0.7, edgecolors='k', label='Data Points')
+
+x_line = torch.linspace(0, 10, 100).unsqueeze(1)
+y_line = (true_w+0.05) * (x_line) + (true_b)
+plt.plot(x_line.numpy(), y_line.numpy(), color='crimson', linewidth=2.5, label=f'Line 1')
+
+x_line = torch.linspace(0, 10, 100).unsqueeze(1)
+y_line = (true_w-0.1) * (x_line) + (true_b+0.8)
+plt.plot(x_line.numpy(), y_line.numpy(), color='green', linewidth=2.5, label=f'Line 2')
+
+
+
+plt.xlabel('x', fontsize=12)
+plt.ylabel('y', fontsize=12)
+plt.legend(fontsize=11)
+plt.grid(True, linestyle='--', alpha=0.6)
+plt.tight_layout()
+plt.show()
+```
+
+## Loss functions!
+
+Evaluate how good our model is
+
+```{.python data-live="true"}
+import torch
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.collections import LineCollection
+from matplotlib.colors import Normalize
+
+torch.manual_seed(0)
+true_w, true_b = 2.0, 1.0
+x = torch.rand(num_datapoints, 1) * 10
+y = true_w * x + true_b + torch.randn_like(x) * 2.0
+xs, ys = x.numpy().flatten(), y.numpy().flatten()
+
+lines = {'Line 1': (true_w + 0.05, true_b),
+         'Line 2': (true_w - 0.1,  true_b + 0.8)}
+
+# shared color scale so both panels are comparable
+vmax = max(np.abs(ys - (w * xs + b)).max() for w, b in lines.values())
+norm = Normalize(0, vmax)
+
+fig, axes = plt.subplots(1, 2, figsize=(14, 6), sharey=True)
+for ax, (name, (w, b)), c in zip(axes, lines.items(), ['crimson', 'limegreen']):
+    pred = w * xs + b
+    err = np.abs(ys - pred)
+
+    # one vertical segment per point: (x, y) -> (x, prediction)
+    segs = [[(xi, yi), (xi, pi)] for xi, yi, pi in zip(xs, ys, pred)]
+    lc = LineCollection(segs, cmap='plasma', norm=norm, linewidths=1 + 2.5 * err / vmax)
+    lc.set_array(err)
+    ax.add_collection(lc)
+
+    ax.scatter(xs, ys, color='royalblue', edgecolors='k', alpha=0.8, zorder=3)
+    ax.plot([0, 10], [b, w * 10 + b], color=c, linewidth=3, zorder=4)
+
+    mse, mae = np.mean((ys - pred) ** 2), err.mean()
+    ax.set_title(f'{name}   MSE = {mse:.3f}   MAE = {mae:.3f}', fontsize=14)
+    ax.set_xlabel('x', fontsize=12)
+    ax.grid(True, linestyle='--', alpha=0.4)
+
+axes[0].set_ylabel('y', fontsize=12)
+fig.colorbar(lc, ax=axes, label='|error|', shrink=0.85)
+plt.show()
+```
+
+## Loss landscape
+
+
+```{.python data-live="true" data-out-ratio="1.8"}
+import torch
+import numpy as np
+import matplotlib.pyplot as plt
+
+torch.manual_seed(0)
+true_w, true_b = 2.0, 1.0
+x = torch.rand(25, 1) * 10
+y = true_w * x + true_b + torch.randn_like(x) * 2.0
+xs, ys = x.numpy().flatten(), y.numpy().flatten()
+
+# ---------- loss functions (per-residual, vectorised) ----------
+def _mse(r):        return r ** 2
+def _mae(r):        return np.abs(r)
+def _huber(r, d=2.0):
+    a = np.abs(r)
+    return np.where(a <= d, 0.5 * r ** 2, d * (a - 0.5 * d))
+def _logcosh(r):    # numerically stable log(cosh(r))
+    a = np.abs(r)
+    return a + np.log1p(np.exp(-2 * a)) - np.log(2)
+def _quantile(r, tau=0.8):   # pinball loss: penalises under-prediction more
+    return np.maximum(tau * r, (tau - 1) * r)
+def _eps_insens(r, eps=2.0): # SVR-style: zero loss inside a tube
+    return np.maximum(0, np.abs(r) - eps)
+def _cauchy(r, c=2.0):       # robust & non-convex: outliers saturate
+    return 0.5 * c ** 2 * np.log1p((r / c) ** 2)
+
+# ---------- more loss functions ----------
+
+# --- semi-reasonable ---
+def _pseudo_huber(r, d=2.0):          # smooth Huber, differentiable everywhere
+    return d ** 2 * (np.sqrt(1 + (r / d) ** 2) - 1)
+
+def _tukey(r, c=4.0):                 # Tukey biweight: saturates hard for outliers
+    a = np.minimum(np.abs(r), c)
+    return (c ** 2 / 6) * (1 - (1 - (a / c) ** 2) ** 3)
+
+def _welsch(r, c=2.0):                # Gaussian-shaped saturation
+    return 0.5 * c ** 2 * (1 - np.exp(-(r / c) ** 2))
+
+def _squared_eps(r, eps=1.5):         # squared loss with a dead zone
+    return np.maximum(0, np.abs(r) - eps) ** 2
+
+def _asym_exp(r, a=0.5):              # LINEX: exponential one side, linear on the other
+    return np.exp(a * r) - a * r - 1
+
+# --- unreasonable but fun ---
+def _quartic(r):                      # r^4: brutally punishes big errors
+    return r ** 4 / 8
+
+def _sqrt_abs(r):                     # concave: prefers a few huge errors over many small ones
+    return np.sqrt(np.abs(r))
+
+def _sinusoidal(r, f=1.5):            # periodic bumps: a landscape full of local minima
+    return np.abs(r) + 1.5 * (1 - np.cos(f * r))
+
+def _hinge_gap(r, gap=3.0):           # loss is zero ONLY when |r| ≈ gap (wants a gap, not a fit)
+    return (np.abs(r) - gap) ** 2
+
+def _ripple(r):                       # MSE with a decaying wobble on top
+    return 0.3 * r ** 2 + 2 * np.sin(2 * r) ** 2 * np.exp(-np.abs(r) / 4)
+
+def _cliff(r, t=3.0):                 # 0-1 loss with a gentle slope: counts "bad" points
+    return np.abs(r) * 0.1 + (np.abs(r) > t) * 5.0
+
+def _sign_flip(r):                    # rewards over-prediction past a point (non-convex, unbounded below locally)
+    return r ** 2 - 3 * np.tanh(r)
+
+LOSSES = {
+    'MSE':                 _mse,
+    'MAE':                 _mae,
+    'Huber (δ=2)':         _huber,
+    'Log-cosh':            _logcosh,
+    'Quantile (τ=0.8)':    _quantile,
+    'ε-insensitive (ε=2)': _eps_insens,
+    'Cauchy (c=2)':        _cauchy,
+    'Pseudo-Huber':        _pseudo_huber,
+    'Tukey biweight':      _tukey,
+    'Welsch':              _welsch,
+    'Squared ε-insens.':   _squared_eps,
+    'LINEX (a=0.5)':       _asym_exp,
+    'Quartic':             _quartic,
+    'Sqrt |r|':            _sqrt_abs,
+    'Sinusoidal':          _sinusoidal,
+    'Hinge gap (want |r|=3)': _hinge_gap,
+    'Ripple':              _ripple,
+    'Cliff (outlier count)': _cliff,
+    'Sign-flip (tanh)':    _sign_flip,
+}
+
+loss_name = 'MSE'          # <-- pick any key from LOSSES
+_per_residual = LOSSES[loss_name]
+
+def loss_function(w, b):
+    return float(np.mean(_per_residual(w * xs + b - ys)))
+
+lines = {'Line 1': (true_w + 0.05, true_b,       'crimson'),
+         'Line 2': (true_w - 0.1,  true_b + 0.8, 'limegreen')}
+
+# loss landscape grid
+ws = np.linspace(-1, 5, 60)
+bs = np.linspace(-3, 5, 60)
+W, B = np.meshgrid(ws, bs)
+R = W[..., None] * xs + B[..., None] - ys
+L = _per_residual(R).mean(-1)
+
+fig = plt.figure(figsize=(14, 6.5))
+ax2d = fig.add_subplot(1, 2, 1)
+ax3d = fig.add_subplot(1, 2, 2, projection='3d')
+
+# left: data + lines
+ax2d.scatter(xs, ys, color='royalblue', edgecolors='k', alpha=0.8, zorder=3)
+xl = np.array([0, 10])
+for name, (w, b, c) in lines.items():
+    ax2d.plot(xl, w * xl + b, color=c, lw=2.5,
+              label=f'{name} (Loss {loss_function(w, b):.2f})')
+(line3,) = ax2d.plot(xl, 0 * xl, color='gold', lw=3, ls='--', label='Your line')
+ax2d.set_xlim(0, 10); ax2d.set_ylim(ys.min() - 2, ys.max() + 2)
+ax2d.set_xlabel('x'); ax2d.set_ylabel('y')
+ax2d.grid(True, linestyle='--', alpha=0.5)
+ax2d.legend(loc='upper left', fontsize=10)
+
+# right: loss surface + markers
+ax3d.plot_surface(W, B, L, cmap='viridis', alpha=0.65, linewidth=0)
+for name, (w, b, c) in lines.items():
+    ax3d.scatter([w], [b], [loss_function(w, b)], color=c, s=90, edgecolors='k',
+                 depthshade=False, label=name)
+(pt3,) = ax3d.plot([0], [0], [0], 'o', color='gold', ms=11, mec='k', label='Your line')
+ax3d.set_xlabel('slope (w)'); ax3d.set_ylabel('bias (b)'); ax3d.set_zlabel('Loss')
+ax3d.set_title(f'Loss landscape: {loss_name}')
+ax3d.view_init(elev=30, azim=-60)
+ax3d.legend(loc='upper left', fontsize=10)
+
+def update(w, b, azim, elev):
+    line3.set_ydata(w * xl + b)
+    pt3.set_data([w], [b])
+    pt3.set_3d_properties([loss_function(w, b)])
+    ax2d.set_title(f'Your line: w={w:.2f}, b={b:.2f}   {loss_name} = {loss_function(w, b):.2f}')
+    ax3d.view_init(elev=elev, azim=azim)
+
+live_sliders(fig, update,
+             w=(-1, 5, 1.0, 0.05),        # (min, max, start, step)
+             b=(-3, 5, 3.0, 0.05),
+             azim=(-180, 180, -60, 2),    # rotate around the vertical axis
+             elev=(0, 90, 30, 1))         # tilt: 0 = side view, 90 = top-down
+```
