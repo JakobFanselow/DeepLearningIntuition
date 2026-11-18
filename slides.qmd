@@ -40,7 +40,7 @@ plt.show()
 
 ## Let's put a line over the data
 
-```{.python data-live="true"}
+```{.python data-live="true" data-autorun="true"}
 import torch, torch.nn as nn
 import matplotlib.pyplot as plt
 
@@ -70,7 +70,7 @@ plt.show()
 
 ## What about other lines?
 
-```{.python data-live="true"}
+```{.python data-live="true" data-autorun="true"}
 import torch, torch.nn as nn
 import matplotlib.pyplot as plt
 
@@ -140,7 +140,7 @@ plt.show()
 
 Evaluate how good our model is
 
-```{.python data-live="true"}
+```{.python data-live="true" data-autorun="true"}
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
@@ -187,7 +187,7 @@ plt.show()
 ## Loss landscape
 
 
-```{.python data-live="true" data-out-ratio="1.8"}
+```{.python data-live="true" data-out-ratio="1.8" data-autorun="true"}
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
@@ -316,7 +316,7 @@ for name, (w, b, c) in lines.items():
                  depthshade=False, label=name)
 (pt3,) = ax3d.plot([0], [0], [0], 'o', color='gold', ms=11, mec='k', label='Your line')
 ax3d.set_xlabel('slope (w)'); ax3d.set_ylabel('bias (b)'); ax3d.set_zlabel('Loss')
-ax3d.set_title(f'Loss landscape: {loss_name}')
+ax3d.set_title(f'Loss landscape f(x) = wx + b: {loss_name}')
 ax3d.view_init(elev=30, azim=-60)
 ax3d.legend(loc='upper left', fontsize=10)
 
@@ -332,4 +332,949 @@ live_sliders(fig, update,
              b=(-3, 5, 3.0, 0.05),
              azim=(-180, 180, -60, 2),    # rotate around the vertical axis
              elev=(0, 90, 30, 1))         # tilt: 0 = side view, 90 = top-down
+```
+
+
+## NN
+
+```{.python data-live="true" data-autorun="true"}
+import numpy as np
+import matplotlib.pyplot as plt
+
+def draw_network(n_in, n_out, hidden=(), max_neurons=10, figsize=None,
+                 neuron_radius=0.28, show_labels=True, title=None):
+    """
+    Draw a fully-connected neural network.
+
+    n_in, n_out : number of input / output neurons
+    hidden      : int or list of ints, e.g. [4, 6, 4] (default: no hidden layers)
+    max_neurons : layers bigger than this are abbreviated with a vertical "..."
+    """
+    if isinstance(hidden, int):
+        hidden = [hidden]
+    layers = [n_in, *hidden, n_out]
+    n_layers = len(layers)
+
+    # number of visible "slots" per layer (middle slot becomes an ellipsis if truncated)
+    slots = [n if n <= max_neurons else max_neurons for n in layers]
+    truncated = [n > max_neurons for n in layers]
+    tallest = max(slots)
+
+    if figsize is None:
+        figsize = (max(6, 2.6 * n_layers), max(4, 0.7 * tallest + 1.5))
+
+    fig, ax = plt.subplots(figsize=figsize)
+
+    # coordinates of each visible neuron
+    coords = []          # list of lists of (x, y)
+    ellipsis_pos = []    # list of (x, y) for "⋮"
+    for li, s in enumerate(slots):
+        x = li * 2.0
+        ys = (s - 1) / 2 - np.arange(s)
+        pts, mid = [], s // 2
+        for i, y in enumerate(ys):
+            if truncated[li] and i == mid:
+                ellipsis_pos.append((x, y))
+            else:
+                pts.append((x, y))
+        coords.append(pts)
+
+    # connections first (behind neurons)
+    for li in range(n_layers - 1):
+        for (x1, y1) in coords[li]:
+            for (x2, y2) in coords[li + 1]:
+                ax.plot([x1, x2], [y1, y2], color='gray', alpha=0.35, lw=0.8, zorder=1)
+
+    # neurons
+    for li, pts in enumerate(coords):
+        if li == 0:
+            color = 'royalblue'
+        elif li == n_layers - 1:
+            color = 'crimson'
+        else:
+            color = 'limegreen'
+        for (x, y) in pts:
+            ax.add_patch(plt.Circle((x, y), neuron_radius, facecolor=color,
+                                    edgecolor='k', lw=1.2, zorder=3))
+
+    for (x, y) in ellipsis_pos:
+        ax.text(x, y, '⋮', ha='center', va='center', fontsize=22, zorder=4)
+
+    # labels
+    if show_labels:
+        y_label = -(tallest - 1) / 2 - 1.0
+        for li, n in enumerate(layers):
+            if li == 0:
+                name = 'Input'
+            elif li == n_layers - 1:
+                name = 'Output'
+            else:
+                name = f'Hidden {li}'
+            ax.text(li * 2.0, y_label, f'{name}\n({n})', ha='center', va='top', fontsize=12)
+
+    ax.set_xlim(-1, (n_layers - 1) * 2.0 + 1)
+    ax.set_ylim(-(tallest - 1) / 2 - 2.2, (tallest - 1) / 2 + 1)
+    ax.set_aspect('equal')
+    ax.axis('off')
+    if title:
+        ax.set_title(title, fontsize=14)
+    plt.tight_layout()
+    return fig
+
+# examples
+draw_network(1, 1)                                   # no hidden layers
+#draw_network(4, 1, hidden=[5, 5])                    # two hidden layers
+#draw_network(784, 10, hidden=[128, 64], title='MNIST-style MLP')
+plt.show()
+```
+
+
+
+## 3D plot
+
+
+``` {.python data-live="true" data-out-ratio="1.8" data-autorun="true"}
+import numpy as np
+import matplotlib.pyplot as plt
+
+# ---------- YOUR DATA GOES HERE ----------
+# x, y, z: 1D arrays of equal length. c: optional per-point values for colouring
+rng = np.random.default_rng(0)
+x = rng.normal(size=200)
+y = rng.normal(size=200)
+z = 2*x + y + rng.normal(size=200) * 0.5
+c = z
+labels = ('x', 'y', 'z')
+title = '3D scatter'
+# ------------------------------------------
+
+fig = plt.figure(figsize=(9, 7))
+ax = fig.add_subplot(111, projection='3d')
+
+sc = ax.scatter(x, y, z, c=c, cmap='viridis', s=40,
+                edgecolors='k', linewidths=0.4, alpha=0.85, depthshade=True)
+
+ax.set_xlabel(labels[0]); ax.set_ylabel(labels[1]); ax.set_zlabel(labels[2])
+ax.set_title(title)
+fig.colorbar(sc, ax=ax, shrink=0.6, pad=0.1)
+ax.view_init(elev=30, azim=-60)
+
+def update(azim, elev):
+    ax.view_init(elev=elev, azim=azim)
+
+live_sliders(fig, update,
+             azim=(-180, 180, -60, 2),   # (min, max, start, step)
+             elev=(0, 90, 30, 1))
+
+```
+
+
+## Put a plane over the data
+
+```{.python data-live="true" data-out-ratio="1.8" data-autorun="true"}
+import numpy as np
+import matplotlib.pyplot as plt
+
+# ---------- YOUR DATA GOES HERE ----------
+# x, y, z: 1D arrays of equal length. c: optional per-point values for colouring
+rng = np.random.default_rng(0)
+x = rng.normal(size=200)
+y = rng.normal(size=200)
+z = 2*x + y + rng.normal(size=200) * 0.5 + 0.3
+c = z
+labels = ('x', 'y', 'z')
+title = '3D scatter with fitted plane'
+# ------------------------------------------
+
+# ---------- Fit plane: z = a*x + b*y + d (least squares) ----------
+A = np.column_stack([x, y, np.ones_like(x)])
+(a, b, d), *_ = np.linalg.lstsq(A, z, rcond=None)
+
+z_pred = A @ np.array([a, b, d])
+ss_res = np.sum((z - z_pred) ** 2)
+ss_tot = np.sum((z - z.mean()) ** 2)
+r2 = 1 - ss_res / ss_tot
+#print(f"z = {a:.3f}*x + {b:.3f}*y + {d:.3f}   (R² = {r2:.3f})")
+
+# Plane surface over the data's x/y extent
+gx = np.linspace(x.min(), x.max(), 20)
+gy = np.linspace(y.min(), y.max(), 20)
+GX, GY = np.meshgrid(gx, gy)
+GZ = a * GX + b * GY + d
+# ------------------------------------------------------------------
+
+fig = plt.figure(figsize=(9, 7))
+ax = fig.add_subplot(111, projection='3d')
+
+# Plane first so points draw on top
+ax.plot_surface(GX, GY, GZ, color='tab:blue', alpha=0.25,
+                linewidth=0, antialiased=True, shade=False)
+ax.plot_wireframe(GX, GY, GZ, color='tab:blue', alpha=0.25,
+                  linewidth=0.5, rstride=2, cstride=2)
+
+sc = ax.scatter(x, y, z, c=c, cmap='viridis', s=40,
+                edgecolors='k', linewidths=0.4, alpha=0.85, depthshade=True)
+
+ax.set_xlabel(labels[0]); ax.set_ylabel(labels[1]); ax.set_zlabel(labels[2])
+ax.set_title(f"{title}\nz = {a:.2f}x + {b:.2f}y + {d:.2f}")
+fig.colorbar(sc, ax=ax, shrink=0.6, pad=0.1)
+ax.view_init(elev=30, azim=-60)
+
+def update(azim, elev):
+    ax.view_init(elev=elev, azim=azim)
+
+live_sliders(fig, update,
+             azim=(-180, 180, -60, 2),   # (min, max, start, step)
+             elev=(0, 90, 30, 1))
+```
+
+
+
+## 2 Inputs loss landscape
+
+
+```{.python data-live="true" data-out-ratio="1.8" data-autorun="true"}
+import numpy as np
+import matplotlib.pyplot as plt
+
+# ---------- DATA ----------
+rng = np.random.default_rng(0)
+x = rng.normal(size=200)
+y = rng.normal(size=200)
+z = 2*x + y + rng.normal(size=200) * 0.5 + 0.3
+labels = ('x', 'y', 'z')
+
+LOSSES = {
+    'MSE':                 _mse,
+    'MAE':                 _mae,
+    'Huber (δ=2)':         _huber,
+    'Log-cosh':            _logcosh,
+    'Quantile (τ=0.8)':    _quantile,
+    'ε-insensitive (ε=2)': _eps_insens,
+    'Cauchy (c=2)':        _cauchy,
+    'Pseudo-Huber':        _pseudo_huber,
+    'Tukey biweight':      _tukey,
+    'Welsch':              _welsch,
+    'Squared ε-insens.':   _squared_eps,
+    'LINEX (a=0.5)':       _asym_exp,
+    'Quartic':             _quartic,
+    'Sqrt |r|':            _sqrt_abs,
+    'Sinusoidal':          _sinusoidal,
+    'Hinge gap (want |r|=3)': _hinge_gap,
+    'Ripple':              _ripple,
+    'Cliff (outlier count)': _cliff,
+    'Sign-flip (tanh)':    _sign_flip,
+}
+
+#try 'Sinusoidal'  'Cliff (outlier count)' 'Sqrt |r|' 'Welsch' 'Tukey biweight' 'Cauchy (c=2)'
+loss_name = 'MSE'                      # <-- any key from LOSSES
+_per_residual = LOSSES[loss_name]
+
+def loss_function(w1, w2, b):
+    return float(np.mean(_per_residual(w1 * x + w2 * y + b - z)))
+
+# ---------- Least-squares fit (reference) ----------
+A = np.column_stack([x, y, np.ones_like(x)])
+(a_fit, b_fit, d_fit), *_ = np.linalg.lstsq(A, z, rcond=None)
+
+# ---------- Grids ----------
+w1s = np.linspace(-1, 5, 50)
+w2s = np.linspace(-3, 5, 50)
+W1, W2 = np.meshgrid(w1s, w2s)
+
+def loss_surface(b):
+    R = W1[..., None] * x + W2[..., None] * y + b - z
+    return _per_residual(R).mean(-1)
+
+# Fixed z-limits across all biases so the surface is comparable while sliding b
+_all = np.concatenate([loss_surface(bb).ravel() for bb in np.linspace(-3, 5, 9)])
+zlo, zhi = min(0, _all.min()), np.percentile(_all, 98)
+
+gx = np.linspace(x.min(), x.max(), 12)
+gy = np.linspace(y.min(), y.max(), 12)
+GX, GY = np.meshgrid(gx, gy)
+
+# ---------- Figure ----------
+fig = plt.figure(figsize=(14, 6.5))
+axd = fig.add_subplot(1, 2, 1, projection='3d')
+axl = fig.add_subplot(1, 2, 2, projection='3d')
+
+# left: data (static)
+axd.scatter(x, y, z, c=z, cmap='viridis', s=25, edgecolors='k',
+            linewidths=0.3, alpha=0.85, depthshade=True)
+axd.set_xlabel(labels[0]); axd.set_ylabel(labels[1]); axd.set_zlabel(labels[2])
+axd.set_zlim(z.min() - 1, z.max() + 1)
+
+# right: static decorations
+axl.set_xlabel('w1'); axl.set_ylabel('w2'); axl.set_zlabel('Loss')
+axl.set_zlim(zlo, zhi)
+
+# dynamic artists
+state = {'plane': None, 'surf': None}
+(pt,) = axl.plot([0], [0], [0], 'o', color='gold', ms=11, mec='k',
+                 label='Your plane', zorder=10)
+(fit_pt,) = axl.plot([a_fit], [b_fit], [loss_function(a_fit, b_fit, d_fit)],
+                     '*', color='crimson', ms=14, mec='k',
+                     label='Least-squares fit', zorder=10)
+axl.legend(loc='upper left', fontsize=10)
+
+def update(w1, w2, b, azim, elev):
+    # plane over data
+    if state['plane'] is not None:
+        state['plane'].remove()
+    state['plane'] = axd.plot_surface(GX, GY, w1 * GX + w2 * GY + b,
+                                      color='gold', alpha=0.35,
+                                      linewidth=0, shade=False)
+    axd.set_title(f'Your plane: z = {w1:.2f}x + {w2:.2f}y + {b:.2f}')
+
+    # loss surface for the current bias
+    if state['surf'] is not None:
+        state['surf'].remove()
+    state['surf'] = axl.plot_surface(W1, W2, loss_surface(b), cmap='viridis',
+                                     alpha=0.65, linewidth=0)
+    L = loss_function(w1, w2, b)
+    pt.set_data([w1], [w2]); pt.set_3d_properties([L])
+
+    # least-squares fit: re-evaluate its loss under the selected loss function
+    # at the current bias so the star sits on the displayed surface
+    L_fit = loss_function(a_fit, b_fit, b)
+    fit_pt.set_data([a_fit], [b_fit]); fit_pt.set_3d_properties([L_fit])
+
+    axl.set_title(f'Loss landscape over (w1, w2), b = {b:.2f}\n'
+                  f'{loss_name} = {L:.2f}  |  LS fit: {L_fit:.2f}')
+
+    axd.view_init(elev=elev, azim=azim)
+    axl.view_init(elev=elev, azim=azim)
+
+live_sliders(fig, update,
+             w1=(-1, 5, 1.0, 0.05),        # (min, max, start, step)
+             w2=(-3, 5, 0.0, 0.05),
+             b=(-3, 5, 0.3, 0.05),         # bias, starts at 0.3
+             azim=(-180, 180, -60, 2),
+             elev=(0, 90, 30, 1))
+```
+
+
+## 2 Inputs NN
+
+
+```{.python data-live="true" data-autorun="true"}
+draw_network(2, 1)
+plt.show()
+```
+
+
+
+## Non-Linear data?
+
+``` {.python data-live="true" data-out-ratio="1.8" data-autorun="true"}
+import numpy as np
+import matplotlib.pyplot as plt
+
+# ---------- YOUR DATA GOES HERE ----------
+# x, y, z: 1D arrays of equal length. c: optional per-point values for colouring
+rng = np.random.default_rng(0)
+x = rng.normal(size=300)*2
+y = rng.normal(size=300)*2
+z = 1/(np.sqrt(x**2 + y**2)+3)*2 + rng.normal(size=300) * 0.05
+c = z
+labels = ('x', 'y', 'z')
+title = '3D scatter'
+# ------------------------------------------
+
+# ---------- Loss + least-squares reference ----------
+def mse(w1, w2, b):
+    return float(np.mean((w1 * x + w2 * y + b - z) ** 2))
+
+A = np.column_stack([x, y, np.ones_like(x)])
+(a_fit, b_fit, d_fit), *_ = np.linalg.lstsq(A, z, rcond=None)
+mse_fit = mse(a_fit, b_fit, d_fit)
+
+# ---------- Plane grid ----------
+gx = np.linspace(x.min(), x.max(), 15)
+gy = np.linspace(y.min(), y.max(), 15)
+GX, GY = np.meshgrid(gx, gy)
+zlo, zhi = z.min() - 0.1, z.max() + 0.1
+
+# ---------- Figure ----------
+fig = plt.figure(figsize=(9, 7))
+ax = fig.add_subplot(111, projection='3d')
+
+sc = ax.scatter(x, y, z, c=c, cmap='viridis', s=40,
+                edgecolors='k', linewidths=0.4, alpha=0.85, depthshade=True)
+
+ax.set_xlabel(labels[0]); ax.set_ylabel(labels[1]); ax.set_zlabel(labels[2])
+ax.set_zlim(zlo, zhi)                      # fixed so the view doesn't jump
+fig.colorbar(sc, ax=ax, shrink=0.6, pad=0.1)
+
+state = {'plane': None}
+
+def update(w1, w2, b, azim, elev):
+    if state['plane'] is not None:
+        state['plane'].remove()
+
+    Z = w1 * GX + w2 * GY + b
+    Z = np.where((Z >= zlo) & (Z <= zhi), Z, np.nan)   # hide parts outside the box
+    state['plane'] = ax.plot_surface(GX, GY, Z, color='gold', alpha=0.4,
+                                     linewidth=0, shade=False)
+
+    ax.view_init(elev=elev, azim=azim)
+
+live_sliders(fig, update,
+             w1=(-0.3, 0.3, 0.0, 0.005),   # (min, max, start, step)
+             w2=(-0.3, 0.3, 0.0, 0.005),
+             b=(-0.5, 1.5, 0.3, 0.01),
+             azim=(-180, 180, -60, 2),
+             elev=(0, 90, 30, 1))
+
+```
+
+
+## Baking in non-linearity
+
+```{.python data-live="true" data-autorun="true"}
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.special import erf
+
+# Keep the network drawing
+draw_network(2, 1, hidden=(2))
+plt.show()
+
+# --- Activation functions ---
+def sigmoid(x):    return 1 / (1 + np.exp(-x))
+def tanh(x):       return np.tanh(x)
+def relu(x):       return np.maximum(0, x)
+def leaky_relu(x, a=0.1): return np.where(x > 0, x, a * x)
+def elu(x, a=1.0): return np.where(x > 0, x, a * (np.exp(x) - 1))
+def selu(x, a=1.6733, s=1.0507): return s * np.where(x > 0, x, a * (np.exp(x) - 1))
+def softplus(x):   return np.log1p(np.exp(x))
+def swish(x):      return x * sigmoid(x)
+def gelu(x):       return 0.5 * x * (1 + erf(x / np.sqrt(2)))
+def mish(x):       return x * np.tanh(softplus(x))
+def softsign(x):   return x / (1 + np.abs(x))
+def hard_sigmoid(x): return np.clip(0.2 * x + 0.5, 0, 1)
+
+activations = {
+    "Sigmoid": sigmoid,
+    "Tanh": tanh,
+    "ReLU": relu,
+    "Leaky ReLU": leaky_relu,
+    "ELU": elu,
+    "SELU": selu,
+    "Softplus": softplus,
+    "Swish / SiLU": swish,
+    "GELU": gelu,
+    "Mish": mish,
+    "Softsign": softsign,
+    "Hard Sigmoid": hard_sigmoid,
+}
+
+x = np.linspace(-5, 5, 400)
+
+fig, axes = plt.subplots(3, 4, figsize=(14, 8))
+for ax, (name, fn) in zip(axes.ravel(), activations.items()):
+    ax.plot(x, fn(x), lw=2)
+    ax.axhline(0, color="gray", lw=0.5)
+    ax.axvline(0, color="gray", lw=0.5)
+    ax.set_title(name)
+    ax.set_ylim(-2, 3)
+    ax.grid(alpha=0.3)
+
+fig.suptitle("Common non-linear activation functions", fontsize=14)
+plt.tight_layout()
+plt.show()
+```
+
+
+## MLP
+
+```{.python data-live="true" data-out-ratio="1.8" data-autorun="true"}
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.optimize import minimize
+
+# ---------- DATA (same as the non-linear data cell) ----------
+rng = np.random.default_rng(0)
+x = rng.normal(size=300) * 2
+y = rng.normal(size=300) * 2
+z = 1 / (np.sqrt(x**2 + y**2) + 3) * 2 + rng.normal(size=300) * 0.05
+labels = ('x', 'y', 'z')
+
+# ---------- CHOICES (edit these) ----------
+LOSSES = {
+    'MSE': _mse, 'MAE': _mae, 'Huber (δ=2)': _huber, 'Log-cosh': _logcosh,
+    'Quantile (τ=0.8)': _quantile, 'ε-insensitive (ε=2)': _eps_insens,
+    'Cauchy (c=2)': _cauchy, 'Pseudo-Huber': _pseudo_huber,
+    'Tukey biweight': _tukey, 'Welsch': _welsch,
+    'Squared ε-insens.': _squared_eps, 'LINEX (a=0.5)': _asym_exp,
+    'Quartic': _quartic, 'Sqrt |r|': _sqrt_abs, 'Sinusoidal': _sinusoidal,
+    'Hinge gap (want |r|=3)': _hinge_gap, 'Ripple': _ripple,
+    'Cliff (outlier count)': _cliff, 'Sign-flip (tanh)': _sign_flip,
+}
+
+activations = {
+    "Sigmoid": sigmoid,
+    "Tanh": tanh,
+    "ReLU": relu,
+    "Leaky ReLU": leaky_relu,
+    "ELU": elu,
+    "SELU": selu,
+    "Softplus": softplus,
+    "Swish / SiLU": swish,
+    "GELU": gelu,
+    "Mish": mish,
+    "Softsign": softsign,
+    "Hard Sigmoid": hard_sigmoid,
+}
+
+loss_name = 'MSE'            # <-- any key from LOSSES
+act_name  = 'GELU'           # <-- any key from `activations`
+show      = ('w11', 'w21')   # <-- the two parameters to put on the landscape axes
+                             #     (any two of the 9 names below)
+INIT_FROM_FIT = True         # start sliders at an optimiser's solution
+AUTO_Z = True                # rescale the loss axis as you move the other sliders
+Z_CLIP_PCT = None            # None = show the FULL surface. Or e.g. 99 to cap
+                             #     the z-axis at that percentile (hides huge spikes)
+Z_MARGIN = 0.05              # fractional padding added above/below the loss range
+VIEW_ZOOM = 0.85             # <1 shrinks the 3D boxes so nothing is cropped by
+                             #     the figure edge (try 0.75 if still clipped)
+
+WIDTH = 0.3                  # <-- half-width of every slider / landscape range
+                             #     around the optimiser's solution (smaller = zoomed in)
+WIDTH_OVERRIDE = {}          # <-- optional per-parameter half-widths, e.g. {'d': 0.1}
+SEARCH_RANGE = (-3, 3)       # range the optimiser is allowed to search (wide)
+
+# Parameter layout of the 2-2-1 network (9 parameters):
+#   hidden1 = act(w11*x + w12*y + c1)
+#   hidden2 = act(w21*x + w22*y + c2)
+#   out     = v1*hidden1 + v2*hidden2 + d
+NAMES = ['w11', 'w12', 'w21', 'w22', 'c1', 'c2', 'v1', 'v2', 'd']
+assert len(set(show)) == 2 and all(s in NAMES for s in show)
+
+_per_residual = LOSSES[loss_name]
+act = activations[act_name]
+
+# ---------- Model ----------
+def mlp(p, X, Y):
+    with np.errstate(all='ignore'):
+        h1 = act(p['w11'] * X + p['w12'] * Y + p['c1'])
+        h2 = act(p['w21'] * X + p['w22'] * Y + p['c2'])
+        return p['v1'] * h1 + p['v2'] * h2 + p['d']
+
+def loss_function(p):
+    return float(np.mean(_per_residual(mlp(p, x, y) - z)))
+
+# ---------- Reference solution (multi-start L-BFGS-B, wide search) ----------
+def _flat(theta):
+    L = loss_function(dict(zip(NAMES, theta)))
+    return L if np.isfinite(L) else 1e9
+
+_r = np.random.default_rng(1)
+_bounds = [SEARCH_RANGE] * len(NAMES)
+best = min((minimize(_flat, _r.uniform(-1.5, 1.5, 9), method='L-BFGS-B',
+                     bounds=_bounds) for _ in range(8)), key=lambda r: r.fun)
+fit = dict(zip(NAMES, best.x))
+
+# ---------- Slider / landscape ranges: tight window around the solution ----------
+HALF = {n: WIDTH_OVERRIDE.get(n, WIDTH) for n in NAMES}
+RANGES = {n: (fit[n] - HALF[n], fit[n] + HALF[n]) for n in NAMES}
+STEP = {n: 2 * HALF[n] / 60 for n in NAMES}       # ~60 slider positions per range
+
+# ---------- Landscape grid over the two chosen parameters ----------
+G = 40
+a_name, b_name = show
+ga = np.linspace(*RANGES[a_name], G)
+gb = np.linspace(*RANGES[b_name], G)
+GA, GB = np.meshgrid(ga, gb)
+
+def loss_surface(p):
+    q = dict(p)
+    q[a_name] = GA[..., None]            # broadcast over the data axis
+    q[b_name] = GB[..., None]
+    with np.errstate(all='ignore'):
+        S = _per_residual(mlp(q, x, y) - z).mean(-1)
+    return np.where(np.isfinite(S), S, np.nan)
+
+# ---------- Data-space grid for drawing the network's output surface ----------
+gx = np.linspace(x.min(), x.max(), 25)
+gy = np.linspace(y.min(), y.max(), 25)
+GX, GY = np.meshgrid(gx, gy)
+zlo_d, zhi_d = z.min() - 0.1, z.max() + 0.1
+
+# ---------- Figure ----------
+fig = plt.figure(figsize=(14, 7))
+axd = fig.add_subplot(1, 2, 1, projection='3d')
+axl = fig.add_subplot(1, 2, 2, projection='3d')
+fig.subplots_adjust(left=0.0, right=1.0, bottom=0.0, top=0.88, wspace=0.0)
+
+# Shrink the 3D boxes slightly so they are never cropped by the figure edge
+for _ax in (axd, axl):
+    try:
+        _ax.set_box_aspect(None, zoom=VIEW_ZOOM)
+    except TypeError:                     # older matplotlib without `zoom`
+        _ax.set_box_aspect(None)
+
+axd.scatter(x, y, z, c=z, cmap='viridis', s=25, edgecolors='k',
+            linewidths=0.3, alpha=0.85, depthshade=True)
+axd.set_xlabel(labels[0]); axd.set_ylabel(labels[1]); axd.set_zlabel(labels[2])
+
+# Fix the data-panel limits explicitly (so nothing is autoscaled away)
+_px = 0.02 * (x.max() - x.min()); _py = 0.02 * (y.max() - y.min())
+axd.set_xlim(x.min() - _px, x.max() + _px)
+axd.set_ylim(y.min() - _py, y.max() + _py)
+axd.set_zlim(zlo_d, zhi_d)
+
+axl.set_xlabel(a_name); axl.set_ylabel(b_name); axl.set_zlabel('Loss')
+
+# Fix the landscape x/y limits to exactly the slider windows (+ small pad)
+_pa = 0.03 * (RANGES[a_name][1] - RANGES[a_name][0])
+_pb = 0.03 * (RANGES[b_name][1] - RANGES[b_name][0])
+axl.set_xlim(RANGES[a_name][0] - _pa, RANGES[a_name][1] + _pa)
+axl.set_ylim(RANGES[b_name][0] - _pb, RANGES[b_name][1] + _pb)
+
+state = {'net': None, 'surf': None}
+# start the marker artists as NaN so they don't drag the autoscale toward (0,0,0)
+(pt,) = axl.plot([np.nan], [np.nan], [np.nan], 'o', color='gold', ms=11, mec='k',
+                 label='Your network', zorder=10)
+(fit_pt,) = axl.plot([np.nan], [np.nan], [np.nan], '*', color='crimson', ms=14,
+                     mec='k', label='Optimiser solution', zorder=10)
+axl.legend(loc='upper left', fontsize=10)
+
+def _set_loss_zlim(S, extra=()):
+    """Set the loss-axis limits to show the whole surface (and the markers)."""
+    vals = S[np.isfinite(S)]
+    if vals.size == 0:
+        return
+    lo = vals.min()
+    hi = np.percentile(vals, Z_CLIP_PCT) if Z_CLIP_PCT is not None else vals.max()
+    for e in extra:
+        if np.isfinite(e):
+            lo = min(lo, e)
+            if Z_CLIP_PCT is None:
+                hi = max(hi, e)
+    lo = min(0.0, lo)
+    span = (hi - lo) if hi > lo else max(abs(hi), 1e-6)
+    axl.set_zlim(lo - Z_MARGIN * span if lo < 0 else lo, hi + Z_MARGIN * span)
+
+def update(w11, w12, w21, w22, c1, c2, v1, v2, d, azim, elev):
+    p = dict(w11=w11, w12=w12, w21=w21, w22=w22, c1=c1, c2=c2, v1=v1, v2=v2, d=d)
+
+    # left: the network's output surface over the data
+    if state['net'] is not None:
+        state['net'].remove()
+    Z = mlp(p, GX, GY)
+    Z = np.where((Z >= zlo_d) & (Z <= zhi_d), Z, np.nan)
+    state['net'] = axd.plot_surface(GX, GY, Z, color='gold', alpha=0.4,
+                                    linewidth=0, shade=False)
+    axd.set_title(f'Network output ({act_name} hidden, linear out)')
+
+    # right: loss surface over the two chosen params, others held at slider values
+    if state['surf'] is not None:
+        state['surf'].remove()
+    S = loss_surface(p)
+    state['surf'] = axl.plot_surface(GA, GB, S, cmap='viridis',
+                                     alpha=0.65, linewidth=0)
+
+    L = loss_function(p)
+    pt.set_data([p[a_name]], [p[b_name]]); pt.set_3d_properties([L])
+
+    # optimiser's (a, b) values, other params at the current slider values,
+    # so the star sits on the displayed surface
+    q = dict(p); q[a_name] = fit[a_name]; q[b_name] = fit[b_name]
+    L_fit = loss_function(q)
+    fit_pt.set_data([fit[a_name]], [fit[b_name]]); fit_pt.set_3d_properties([L_fit])
+
+    if AUTO_Z:
+        _set_loss_zlim(S, extra=(L, L_fit))
+
+    # re-assert the x/y limits every update (cheap, and guards against any autoscale)
+    axl.set_xlim(RANGES[a_name][0] - _pa, RANGES[a_name][1] + _pa)
+    axl.set_ylim(RANGES[b_name][0] - _pb, RANGES[b_name][1] + _pb)
+
+    others = ', '.join(f'{n}={p[n]:.3f}' for n in NAMES if n not in show)
+    axl.set_title(f'{loss_name} over ({a_name}, {b_name})\n'
+                  f'held fixed: {others}\n'
+                  f'loss = {L:.4f}  |  at optimiser (a,b): {L_fit:.4f}  '
+                  f'|  global best: {best.fun:.4f}', fontsize=9)
+
+    axd.view_init(elev=elev, azim=azim)
+    axl.view_init(elev=elev, azim=azim)
+
+def _start(n):
+    lo, hi = RANGES[n]
+    if INIT_FROM_FIT:
+        return float(np.clip(fit[n], lo, hi))
+    return float(np.clip(0.0, lo, hi))
+
+live_sliders(fig, update,
+             w11=(*RANGES['w11'], _start('w11'), STEP['w11']),   # (min, max, start, step)
+             w12=(*RANGES['w12'], _start('w12'), STEP['w12']),
+             w21=(*RANGES['w21'], _start('w21'), STEP['w21']),
+             w22=(*RANGES['w22'], _start('w22'), STEP['w22']),
+             c1=(*RANGES['c1'],  _start('c1'),  STEP['c1']),
+             c2=(*RANGES['c2'],  _start('c2'),  STEP['c2']),
+             v1=(*RANGES['v1'],  _start('v1'),  STEP['v1']),
+             v2=(*RANGES['v2'],  _start('v2'),  STEP['v2']),
+             d=(*RANGES['d'],    _start('d'),   STEP['d']),
+             azim=(-180, 180, -60, 2),
+             elev=(0, 90, 30, 1))
+```
+
+## More hidden layers!
+
+
+```{.python data-live="true" data-autorun="true"}
+draw_network(2, 1, hidden=(2,2))
+plt.show()
+```
+
+
+
+## MLP 2 hidden layers
+```{.python data-live="true" data-out-ratio="1.8" data-autorun="true"}
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.optimize import minimize
+
+# ---------- DATA (same as the non-linear data cell) ----------
+rng = np.random.default_rng(0)
+x = rng.normal(size=300) * 2
+y = rng.normal(size=300) * 2
+z = 1 / (np.sqrt(x**2 + y**2) + 3) * 2 + rng.normal(size=300) * 0.05
+labels = ('x', 'y', 'z')
+
+# ---------- CHOICES (edit these) ----------
+LOSSES = {
+    'MSE': _mse, 'MAE': _mae, 'Huber (δ=2)': _huber, 'Log-cosh': _logcosh,
+    'Quantile (τ=0.8)': _quantile, 'ε-insensitive (ε=2)': _eps_insens,
+    'Cauchy (c=2)': _cauchy, 'Pseudo-Huber': _pseudo_huber,
+    'Tukey biweight': _tukey, 'Welsch': _welsch,
+    'Squared ε-insens.': _squared_eps, 'LINEX (a=0.5)': _asym_exp,
+    'Quartic': _quartic, 'Sqrt |r|': _sqrt_abs, 'Sinusoidal': _sinusoidal,
+    'Hinge gap (want |r|=3)': _hinge_gap, 'Ripple': _ripple,
+    'Cliff (outlier count)': _cliff, 'Sign-flip (tanh)': _sign_flip,
+}
+
+activations = {
+    "Sigmoid": sigmoid,
+    "Tanh": tanh,
+    "ReLU": relu,
+    "Leaky ReLU": leaky_relu,
+    "ELU": elu,
+    "SELU": selu,
+    "Softplus": softplus,
+    "Swish / SiLU": swish,
+    "GELU": gelu,
+    "Mish": mish,
+    "Softsign": softsign,
+    "Hard Sigmoid": hard_sigmoid,
+}
+
+loss_name = 'MSE'            # <-- any key from LOSSES
+act_name  = 'GELU'           # <-- any key from `activations`
+show      = ('w11', 'w21')   # <-- the two parameters to put on the landscape axes
+                             #     (any two of the 15 names below)
+INIT_FROM_FIT = True         # start sliders at an optimiser's solution
+AUTO_Z = True                # rescale the loss axis as you move the other sliders
+Z_CLIP_PCT = None            # None = show the FULL surface. Or e.g. 99 to cap
+                             #     the z-axis at that percentile (hides huge spikes)
+Z_MARGIN = 0.05              # fractional padding added above/below the loss range
+VIEW_ZOOM = 0.85             # <1 shrinks the 3D boxes so nothing is cropped by
+                             #     the figure edge (try 0.75 if still clipped)
+
+WIDTH = 0.3                  # <-- half-width of every slider / landscape range
+                             #     around the optimiser's solution (smaller = zoomed in)
+WIDTH_OVERRIDE = {}          # <-- optional per-parameter half-widths, e.g. {'d': 0.1}
+SEARCH_RANGE = (-3, 3)       # range the optimiser is allowed to search (wide)
+
+# Parameter layout of the 2-2-2-1 network (15 parameters):
+#   hidden layer 1:
+#     h1 = act(w11*x + w12*y + c1)
+#     h2 = act(w21*x + w22*y + c2)
+#   hidden layer 2:
+#     g1 = act(u11*h1 + u12*h2 + b1)
+#     g2 = act(u21*h1 + u22*h2 + b2)
+#   output:
+#     out = v1*g1 + v2*g2 + d
+NAMES = ['w11', 'w12', 'w21', 'w22', 'c1', 'c2',
+         'u11', 'u12', 'u21', 'u22', 'b1', 'b2',
+         'v1', 'v2', 'd']
+assert len(set(show)) == 2 and all(s in NAMES for s in show)
+
+_per_residual = LOSSES[loss_name]
+act = activations[act_name]
+
+# ---------- Model ----------
+def mlp(p, X, Y):
+    with np.errstate(all='ignore'):
+        h1 = act(p['w11'] * X + p['w12'] * Y + p['c1'])
+        h2 = act(p['w21'] * X + p['w22'] * Y + p['c2'])
+        g1 = act(p['u11'] * h1 + p['u12'] * h2 + p['b1'])
+        g2 = act(p['u21'] * h1 + p['u22'] * h2 + p['b2'])
+        return p['v1'] * g1 + p['v2'] * g2 + p['d']
+
+def loss_function(p):
+    return float(np.mean(_per_residual(mlp(p, x, y) - z)))
+
+# ---------- Reference solution (multi-start L-BFGS-B, wide search) ----------
+def _flat(theta):
+    L = loss_function(dict(zip(NAMES, theta)))
+    return L if np.isfinite(L) else 1e9
+
+_r = np.random.default_rng(1)
+_bounds = [SEARCH_RANGE] * len(NAMES)
+best = min((minimize(_flat, _r.uniform(-1.5, 1.5, len(NAMES)), method='L-BFGS-B',
+                     bounds=_bounds) for _ in range(8)), key=lambda r: r.fun)
+fit = dict(zip(NAMES, best.x))
+
+# ---------- Slider / landscape ranges: tight window around the solution ----------
+HALF = {n: WIDTH_OVERRIDE.get(n, WIDTH) for n in NAMES}
+RANGES = {n: (fit[n] - HALF[n], fit[n] + HALF[n]) for n in NAMES}
+STEP = {n: 2 * HALF[n] / 60 for n in NAMES}       # ~60 slider positions per range
+
+# ---------- Landscape grid over the two chosen parameters ----------
+G = 40
+a_name, b_name = show
+ga = np.linspace(*RANGES[a_name], G)
+gb = np.linspace(*RANGES[b_name], G)
+GA, GB = np.meshgrid(ga, gb)
+
+def loss_surface(p):
+    q = dict(p)
+    q[a_name] = GA[..., None]            # broadcast over the data axis
+    q[b_name] = GB[..., None]
+    with np.errstate(all='ignore'):
+        S = _per_residual(mlp(q, x, y) - z).mean(-1)
+    return np.where(np.isfinite(S), S, np.nan)
+
+# ---------- Data-space grid for drawing the network's output surface ----------
+gx = np.linspace(x.min(), x.max(), 25)
+gy = np.linspace(y.min(), y.max(), 25)
+GX, GY = np.meshgrid(gx, gy)
+zlo_d, zhi_d = z.min() - 0.1, z.max() + 0.1
+
+# ---------- Figure ----------
+fig = plt.figure(figsize=(14, 7))
+axd = fig.add_subplot(1, 2, 1, projection='3d')
+axl = fig.add_subplot(1, 2, 2, projection='3d')
+fig.subplots_adjust(left=0.0, right=1.0, bottom=0.0, top=0.88, wspace=0.0)
+
+# Shrink the 3D boxes slightly so they are never cropped by the figure edge
+for _ax in (axd, axl):
+    try:
+        _ax.set_box_aspect(None, zoom=VIEW_ZOOM)
+    except TypeError:                     # older matplotlib without `zoom`
+        _ax.set_box_aspect(None)
+
+axd.scatter(x, y, z, c=z, cmap='viridis', s=25, edgecolors='k',
+            linewidths=0.3, alpha=0.85, depthshade=True)
+axd.set_xlabel(labels[0]); axd.set_ylabel(labels[1]); axd.set_zlabel(labels[2])
+
+# Fix the data-panel limits explicitly (so nothing is autoscaled away)
+_px = 0.02 * (x.max() - x.min()); _py = 0.02 * (y.max() - y.min())
+axd.set_xlim(x.min() - _px, x.max() + _px)
+axd.set_ylim(y.min() - _py, y.max() + _py)
+axd.set_zlim(zlo_d, zhi_d)
+
+axl.set_xlabel(a_name); axl.set_ylabel(b_name); axl.set_zlabel('Loss')
+
+# Fix the landscape x/y limits to exactly the slider windows (+ small pad)
+_pa = 0.03 * (RANGES[a_name][1] - RANGES[a_name][0])
+_pb = 0.03 * (RANGES[b_name][1] - RANGES[b_name][0])
+axl.set_xlim(RANGES[a_name][0] - _pa, RANGES[a_name][1] + _pa)
+axl.set_ylim(RANGES[b_name][0] - _pb, RANGES[b_name][1] + _pb)
+
+state = {'net': None, 'surf': None}
+# start the marker artists as NaN so they don't drag the autoscale toward (0,0,0)
+(pt,) = axl.plot([np.nan], [np.nan], [np.nan], 'o', color='gold', ms=11, mec='k',
+                 label='Your network', zorder=10)
+(fit_pt,) = axl.plot([np.nan], [np.nan], [np.nan], '*', color='crimson', ms=14,
+                     mec='k', label='Optimiser solution', zorder=10)
+axl.legend(loc='upper left', fontsize=10)
+
+def _set_loss_zlim(S, extra=()):
+    """Set the loss-axis limits to show the whole surface (and the markers)."""
+    vals = S[np.isfinite(S)]
+    if vals.size == 0:
+        return
+    lo = vals.min()
+    hi = np.percentile(vals, Z_CLIP_PCT) if Z_CLIP_PCT is not None else vals.max()
+    for e in extra:
+        if np.isfinite(e):
+            lo = min(lo, e)
+            if Z_CLIP_PCT is None:
+                hi = max(hi, e)
+    lo = lo
+    span = (hi - lo) if hi > lo else max(abs(hi), 1e-6)
+    axl.set_zlim(lo - Z_MARGIN * span if lo < 0 else lo, hi + Z_MARGIN * span)
+
+def update(w11, w12, w21, w22, c1, c2,
+           u11, u12, u21, u22, b1, b2,
+           v1, v2, d, azim, elev):
+    p = dict(w11=w11, w12=w12, w21=w21, w22=w22, c1=c1, c2=c2,
+             u11=u11, u12=u12, u21=u21, u22=u22, b1=b1, b2=b2,
+             v1=v1, v2=v2, d=d)
+
+    # left: the network's output surface over the data
+    if state['net'] is not None:
+        state['net'].remove()
+    Z = mlp(p, GX, GY)
+    Z = np.where((Z >= zlo_d) & (Z <= zhi_d), Z, np.nan)
+    state['net'] = axd.plot_surface(GX, GY, Z, color='gold', alpha=0.4,
+                                    linewidth=0, shade=False)
+    axd.set_title(f'Network output (2 × {act_name} hidden layers, linear out)')
+
+    # right: loss surface over the two chosen params, others held at slider values
+    if state['surf'] is not None:
+        state['surf'].remove()
+    S = loss_surface(p)
+    state['surf'] = axl.plot_surface(GA, GB, S, cmap='viridis',
+                                     alpha=0.65, linewidth=0)
+
+    L = loss_function(p)
+    pt.set_data([p[a_name]], [p[b_name]]); pt.set_3d_properties([L])
+
+    # optimiser's (a, b) values, other params at the current slider values,
+    # so the star sits on the displayed surface
+    q = dict(p); q[a_name] = fit[a_name]; q[b_name] = fit[b_name]
+    L_fit = loss_function(q)
+    fit_pt.set_data([fit[a_name]], [fit[b_name]]); fit_pt.set_3d_properties([L_fit])
+
+    if AUTO_Z:
+        _set_loss_zlim(S, extra=(L, L_fit))
+
+    # re-assert the x/y limits every update (cheap, and guards against any autoscale)
+    axl.set_xlim(RANGES[a_name][0] - _pa, RANGES[a_name][1] + _pa)
+    axl.set_ylim(RANGES[b_name][0] - _pb, RANGES[b_name][1] + _pb)
+
+    others = ', '.join(f'{n}={p[n]:.3f}' for n in NAMES if n not in show)
+    axl.set_title(f'{loss_name} over ({a_name}, {b_name})\n'
+                  f'held fixed: {others}\n'
+                  f'loss = {L:.4f}  |  at optimiser (a,b): {L_fit:.4f}  '
+                  f'|  global best: {best.fun:.4f}', fontsize=9)
+
+    axd.view_init(elev=elev, azim=azim)
+    axl.view_init(elev=elev, azim=azim)
+
+def _start(n):
+    lo, hi = RANGES[n]
+    if INIT_FROM_FIT:
+        return float(np.clip(fit[n], lo, hi))
+    return float(np.clip(0.0, lo, hi))
+
+live_sliders(fig, update,
+             **{n: (*RANGES[n], _start(n), STEP[n]) for n in NAMES},   # (min, max, start, step)
+             azim=(-180, 180, -60, 2),
+             elev=(0, 90, 30, 1))
+
+```
+
+
+## Larger hidden layers!
+
+(We won't visualize this)
+```{.python data-live="true" data-autorun="true"}
+draw_network(2, 1, hidden=(3,3))
+plt.show()
 ```
