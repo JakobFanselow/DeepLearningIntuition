@@ -286,12 +286,16 @@ def loss_function(w, b):
 lines = {'Line 1': (true_w + 0.05, true_b,       'crimson'),
          'Line 2': (true_w - 0.1,  true_b + 0.8, 'limegreen')}
 
-# loss landscape grid
-ws = np.linspace(-1, 5, 60)
-bs = np.linspace(-3, 5, 60)
-W, B = np.meshgrid(ws, bs)
-R = W[..., None] * xs + B[..., None] - ys
-L = _per_residual(R).mean(-1)
+# loss landscape grid (zoom = 1 is this window, larger shows more of the landscape)
+w_c, w_h = 2.0, 3.0          # centre and half-width of the w axis
+b_c, b_h = 1.0, 4.0          # centre and half-width of the b axis
+
+def landscape(zoom):
+    ws = np.linspace(w_c - w_h * zoom, w_c + w_h * zoom, 60)
+    bs = np.linspace(b_c - b_h * zoom, b_c + b_h * zoom, 60)
+    W, B = np.meshgrid(ws, bs)
+    R = W[..., None] * xs + B[..., None] - ys
+    return W, B, _per_residual(R).mean(-1)
 
 fig = plt.figure(figsize=(14, 6.5))
 ax2d = fig.add_subplot(1, 2, 1)
@@ -309,8 +313,8 @@ ax2d.set_xlabel('x'); ax2d.set_ylabel('y')
 ax2d.grid(True, linestyle='--', alpha=0.5)
 ax2d.legend(loc='upper left', fontsize=10)
 
-# right: loss surface + markers
-ax3d.plot_surface(W, B, L, cmap='viridis', alpha=0.65, linewidth=0)
+# right: loss surface + markers (redrawn on every zoom change)
+state = {'surf': None}
 for name, (w, b, c) in lines.items():
     ax3d.scatter([w], [b], [loss_function(w, b)], color=c, s=90, edgecolors='k',
                  depthshade=False, label=name)
@@ -320,7 +324,14 @@ ax3d.set_title(f'Loss landscape f(x) = wx + b: {loss_name}')
 ax3d.view_init(elev=30, azim=-60)
 ax3d.legend(loc='upper left', fontsize=10)
 
-def update(w, b, azim, elev):
+def update(w, b, zoom, azim, elev):
+    if state['surf'] is not None:
+        state['surf'].remove()
+    W, B, L = landscape(zoom)
+    state['surf'] = ax3d.plot_surface(W, B, L, cmap='viridis', alpha=0.65, linewidth=0)
+    ax3d.set_xlim(W.min(), W.max()); ax3d.set_ylim(B.min(), B.max())
+    ax3d.set_zlim(min(0, L.min()), np.percentile(L, 98))
+
     line3.set_ydata(w * xl + b)
     pt3.set_data([w], [b])
     pt3.set_3d_properties([loss_function(w, b)])
@@ -330,6 +341,7 @@ def update(w, b, azim, elev):
 live_sliders(fig, update,
              w=(-1, 5, 1.0, 0.05),        # (min, max, start, step)
              b=(-3, 5, 3.0, 0.05),
+             zoom=(1, 10, 1.0, 0.25),     # how much of the landscape to show
              azim=(-180, 180, -60, 2),    # rotate around the vertical axis
              elev=(0, 90, 30, 1))         # tilt: 0 = side view, 90 = top-down
 ```
@@ -578,17 +590,30 @@ A = np.column_stack([x, y, np.ones_like(x)])
 (a_fit, b_fit, d_fit), *_ = np.linalg.lstsq(A, z, rcond=None)
 
 # ---------- Grids ----------
-w1s = np.linspace(-1, 5, 50)
-w2s = np.linspace(-3, 5, 50)
-W1, W2 = np.meshgrid(w1s, w2s)
+w1_c, w1_h = 2.0, 3.0        # centre and half-width of the w1 axis
+w2_c, w2_h = 1.0, 4.0        # centre and half-width of the w2 axis
 
-def loss_surface(b):
+def grid(zoom):              # zoom = 1 is this window, larger shows more of it
+    w1s = np.linspace(w1_c - w1_h * zoom, w1_c + w1_h * zoom, 50)
+    w2s = np.linspace(w2_c - w2_h * zoom, w2_c + w2_h * zoom, 50)
+    return np.meshgrid(w1s, w2s)
+
+def loss_surface(b, zoom=1.0):
+    W1, W2 = grid(zoom)
     R = W1[..., None] * x + W2[..., None] * y + b - z
     return _per_residual(R).mean(-1)
 
-# Fixed z-limits across all biases so the surface is comparable while sliding b
-_all = np.concatenate([loss_surface(bb).ravel() for bb in np.linspace(-3, 5, 9)])
-zlo, zhi = min(0, _all.min()), np.percentile(_all, 98)
+# Fixed z-limits across all biases (per zoom level) so the surface is
+# comparable while sliding b
+_zlim_cache = {}
+def zlim(zoom):
+    if zoom not in _zlim_cache:
+        _all = np.concatenate([loss_surface(bb, zoom).ravel()
+                               for bb in np.linspace(-3, 5, 9)])
+        _zlim_cache[zoom] = (min(0, _all.min()), np.percentile(_all, 98))
+    return _zlim_cache[zoom]
+
+zlo, zhi = zlim(1.0)
 
 gx = np.linspace(x.min(), x.max(), 12)
 gy = np.linspace(y.min(), y.max(), 12)
@@ -618,7 +643,7 @@ state = {'plane': None, 'surf': None}
                      label='Least-squares fit', zorder=10)
 axl.legend(loc='upper left', fontsize=10)
 
-def update(w1, w2, b, azim, elev):
+def update(w1, w2, b, zoom, azim, elev):
     # plane over data
     if state['plane'] is not None:
         state['plane'].remove()
@@ -630,8 +655,11 @@ def update(w1, w2, b, azim, elev):
     # loss surface for the current bias
     if state['surf'] is not None:
         state['surf'].remove()
-    state['surf'] = axl.plot_surface(W1, W2, loss_surface(b), cmap='viridis',
+    W1, W2 = grid(zoom)
+    state['surf'] = axl.plot_surface(W1, W2, loss_surface(b, zoom), cmap='viridis',
                                      alpha=0.65, linewidth=0)
+    axl.set_xlim(W1.min(), W1.max()); axl.set_ylim(W2.min(), W2.max())
+    axl.set_zlim(*zlim(zoom))
     L = loss_function(w1, w2, b)
     pt.set_data([w1], [w2]); pt.set_3d_properties([L])
 
@@ -650,6 +678,7 @@ live_sliders(fig, update,
              w1=(-1, 5, 1.0, 0.05),        # (min, max, start, step)
              w2=(-3, 5, 0.0, 0.05),
              b=(-3, 5, 0.3, 0.05),         # bias, starts at 0.3
+             zoom=(1, 10, 1.0, 0.25),      # how much of the landscape to show
              azim=(-180, 180, -60, 2),
              elev=(0, 90, 30, 1))
 ```
@@ -884,11 +913,15 @@ STEP = {n: 2 * HALF[n] / 60 for n in NAMES}       # ~60 slider positions per ran
 # ---------- Landscape grid over the two chosen parameters ----------
 G = 40
 a_name, b_name = show
-ga = np.linspace(*RANGES[a_name], G)
-gb = np.linspace(*RANGES[b_name], G)
-GA, GB = np.meshgrid(ga, gb)
 
-def loss_surface(p):
+def landscape_grid(zoom):    # zoom = 1 is the slider window, larger shows more
+    ga = np.linspace(fit[a_name] - HALF[a_name] * zoom,
+                     fit[a_name] + HALF[a_name] * zoom, G)
+    gb = np.linspace(fit[b_name] - HALF[b_name] * zoom,
+                     fit[b_name] + HALF[b_name] * zoom, G)
+    return np.meshgrid(ga, gb)
+
+def loss_surface(p, GA, GB):
     q = dict(p)
     q[a_name] = GA[..., None]            # broadcast over the data axis
     q[b_name] = GB[..., None]
@@ -957,7 +990,7 @@ def _set_loss_zlim(S, extra=()):
     span = (hi - lo) if hi > lo else max(abs(hi), 1e-6)
     axl.set_zlim(lo - Z_MARGIN * span if lo < 0 else lo, hi + Z_MARGIN * span)
 
-def update(w11, w12, w21, w22, c1, c2, v1, v2, d, azim, elev):
+def update(w11, w12, w21, w22, c1, c2, v1, v2, d, zoom, azim, elev):
     p = dict(w11=w11, w12=w12, w21=w21, w22=w22, c1=c1, c2=c2, v1=v1, v2=v2, d=d)
 
     # left: the network's output surface over the data
@@ -972,7 +1005,8 @@ def update(w11, w12, w21, w22, c1, c2, v1, v2, d, azim, elev):
     # right: loss surface over the two chosen params, others held at slider values
     if state['surf'] is not None:
         state['surf'].remove()
-    S = loss_surface(p)
+    GA, GB = landscape_grid(zoom)
+    S = loss_surface(p, GA, GB)
     state['surf'] = axl.plot_surface(GA, GB, S, cmap='viridis',
                                      alpha=0.65, linewidth=0)
 
@@ -988,9 +1022,10 @@ def update(w11, w12, w21, w22, c1, c2, v1, v2, d, azim, elev):
     if AUTO_Z:
         _set_loss_zlim(S, extra=(L, L_fit))
 
-    # re-assert the x/y limits every update (cheap, and guards against any autoscale)
-    axl.set_xlim(RANGES[a_name][0] - _pa, RANGES[a_name][1] + _pa)
-    axl.set_ylim(RANGES[b_name][0] - _pb, RANGES[b_name][1] + _pb)
+    # re-assert the x/y limits every update (they follow the zoom slider)
+    pa = 0.03 * (GA.max() - GA.min()); pb = 0.03 * (GB.max() - GB.min())
+    axl.set_xlim(GA.min() - pa, GA.max() + pa)
+    axl.set_ylim(GB.min() - pb, GB.max() + pb)
 
     others = ', '.join(f'{n}={p[n]:.3f}' for n in NAMES if n not in show)
     axl.set_title(f'{loss_name} over ({a_name}, {b_name})\n'
@@ -1017,6 +1052,7 @@ live_sliders(fig, update,
              v1=(*RANGES['v1'],  _start('v1'),  STEP['v1']),
              v2=(*RANGES['v2'],  _start('v2'),  STEP['v2']),
              d=(*RANGES['d'],    _start('d'),   STEP['d']),
+             zoom=(1, 20, 1.0, 0.5),      # how much of the landscape to show
              azim=(-180, 180, -60, 2),
              elev=(0, 90, 30, 1))
 ```
@@ -1136,11 +1172,15 @@ STEP = {n: 2 * HALF[n] / 60 for n in NAMES}       # ~60 slider positions per ran
 # ---------- Landscape grid over the two chosen parameters ----------
 G = 40
 a_name, b_name = show
-ga = np.linspace(*RANGES[a_name], G)
-gb = np.linspace(*RANGES[b_name], G)
-GA, GB = np.meshgrid(ga, gb)
 
-def loss_surface(p):
+def landscape_grid(zoom):    # zoom = 1 is the slider window, larger shows more
+    ga = np.linspace(fit[a_name] - HALF[a_name] * zoom,
+                     fit[a_name] + HALF[a_name] * zoom, G)
+    gb = np.linspace(fit[b_name] - HALF[b_name] * zoom,
+                     fit[b_name] + HALF[b_name] * zoom, G)
+    return np.meshgrid(ga, gb)
+
+def loss_surface(p, GA, GB):
     q = dict(p)
     q[a_name] = GA[..., None]            # broadcast over the data axis
     q[b_name] = GB[..., None]
@@ -1211,7 +1251,7 @@ def _set_loss_zlim(S, extra=()):
 
 def update(w11, w12, w21, w22, c1, c2,
            u11, u12, u21, u22, b1, b2,
-           v1, v2, d, azim, elev):
+           v1, v2, d, zoom, azim, elev):
     p = dict(w11=w11, w12=w12, w21=w21, w22=w22, c1=c1, c2=c2,
              u11=u11, u12=u12, u21=u21, u22=u22, b1=b1, b2=b2,
              v1=v1, v2=v2, d=d)
@@ -1228,7 +1268,8 @@ def update(w11, w12, w21, w22, c1, c2,
     # right: loss surface over the two chosen params, others held at slider values
     if state['surf'] is not None:
         state['surf'].remove()
-    S = loss_surface(p)
+    GA, GB = landscape_grid(zoom)
+    S = loss_surface(p, GA, GB)
     state['surf'] = axl.plot_surface(GA, GB, S, cmap='viridis',
                                      alpha=0.65, linewidth=0)
 
@@ -1244,9 +1285,10 @@ def update(w11, w12, w21, w22, c1, c2,
     if AUTO_Z:
         _set_loss_zlim(S, extra=(L, L_fit))
 
-    # re-assert the x/y limits every update (cheap, and guards against any autoscale)
-    axl.set_xlim(RANGES[a_name][0] - _pa, RANGES[a_name][1] + _pa)
-    axl.set_ylim(RANGES[b_name][0] - _pb, RANGES[b_name][1] + _pb)
+    # re-assert the x/y limits every update (they follow the zoom slider)
+    pa = 0.03 * (GA.max() - GA.min()); pb = 0.03 * (GB.max() - GB.min())
+    axl.set_xlim(GA.min() - pa, GA.max() + pa)
+    axl.set_ylim(GB.min() - pb, GB.max() + pb)
 
     others = ', '.join(f'{n}={p[n]:.3f}' for n in NAMES if n not in show)
     axl.set_title(f'{loss_name} over ({a_name}, {b_name})\n'
@@ -1265,6 +1307,7 @@ def _start(n):
 
 live_sliders(fig, update,
              **{n: (*RANGES[n], _start(n), STEP[n]) for n in NAMES},   # (min, max, start, step)
+             zoom=(1, 20, 1.0, 0.5),   # how much of the landscape to show
              azim=(-180, 180, -60, 2),
              elev=(0, 90, 30, 1))
 

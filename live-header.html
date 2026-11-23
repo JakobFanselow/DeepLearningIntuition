@@ -46,11 +46,16 @@
   /* sliders */
   .live-sliders { margin-top: 12px; display: grid; gap: 8px; }
   .live-slider {
-    display: grid; grid-template-columns: 110px 1fr 70px;
+    display: grid; grid-template-columns: 110px 1fr 90px;
     gap: 12px; align-items: center; font-size: 18px;
   }
   .live-slider input[type=range] { width: 100%; accent-color: #00e0e0; cursor: pointer; }
-  .live-slider .val { text-align: right; color: #00e0e0; }
+  .live-slider .val {
+    width: 100%; box-sizing: border-box; text-align: right; font: inherit;
+    font-size: 16px; color: #00e0e0; background: #111;
+    border: 1px solid #333; border-radius: 4px; padding: 3px 4px;
+  }
+  .live-slider .val:focus { outline: none; border-color: #00e0e0; }
 </style>
 
 <script>
@@ -185,17 +190,33 @@ def _live_call(sid, payload):
       const input = document.createElement("input");
       input.type = "range";
       input.min = s.min; input.max = s.max; input.step = s.step; input.value = s.value;
-      const val = document.createElement("span");
+      // editable box: shows the value, and accepts any number you type in,
+      // including ones outside the slider's range (the slider grows to fit)
+      const fmt = (v) => String(Math.round(v * 1e6) / 1e6);
+      const val = document.createElement("input");
+      val.type = "number";
       val.className = "val";
-      val.textContent = Number(s.value).toFixed(2);
+      val.step = s.step;
+      val.value = fmt(Number(s.value));
       input.addEventListener("input", () => {
         values[s.name] = parseFloat(input.value);
-        val.textContent = values[s.name].toFixed(2);
+        val.value = fmt(values[s.name]);
         refresh();
       });
-      // don't let Reveal grab arrow keys while a slider is focused
+      val.addEventListener("change", () => {
+        const v = parseFloat(val.value);
+        if (!Number.isFinite(v)) { val.value = fmt(values[s.name]); return; }
+        values[s.name] = v;
+        if (v < Number(input.min)) input.min = v;   // widen the slider to reach it
+        if (v > Number(input.max)) input.max = v;
+        input.value = v;
+        val.value = fmt(v);
+        refresh();
+      });
+      // don't let Reveal grab arrow keys / letters while a slider or box is focused
       for (const ev of ["keydown", "keyup", "keypress"]) {
         input.addEventListener(ev, (e) => e.stopPropagation());
+        val.addEventListener(ev, (e) => e.stopPropagation());
       }
       row.append(label, input, val);
       box.appendChild(row);
