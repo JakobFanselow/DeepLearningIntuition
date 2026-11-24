@@ -65,11 +65,26 @@
 
   // Runs once in each new kernel; defines live_sliders() for slide code.
   const PRELUDE = `
-import io, base64, json, uuid
+import io, base64, json, uuid, types
 from IPython.display import display
 import matplotlib.pyplot as plt
 
 _LIVE = {}
+
+def _pinned(update):
+    """update, but seeing the global names (fig, ax, img_ax, helper functions, ...)
+    as they were when its slide ran. All slides share one kernel and reuse names,
+    so without this, going back to an earlier slide would draw into a later one."""
+    live = update.__globals__
+    pinned = dict(live)
+    def rebind(f):
+        g = types.FunctionType(f.__code__, pinned, f.__name__, f.__defaults__, f.__closure__)
+        g.__kwdefaults__ = f.__kwdefaults__
+        return g
+    for name, value in live.items():
+        if isinstance(value, types.FunctionType) and value.__globals__ is live:
+            pinned[name] = rebind(value)
+    return rebind(update)
 
 def _png(fig, dpi=80):
     buf = io.BytesIO()
@@ -79,6 +94,7 @@ def _png(fig, dpi=80):
 def live_sliders(fig, update, **sliders):
     """sliders: name=(min, max, start, step). update(**values) mutates fig."""
     sid = uuid.uuid4().hex
+    update = _pinned(update)
     _LIVE[sid] = (fig, update)
     plt.close(fig)   # keep the object, stop the inline backend auto-showing it
     update(**{k: v[2] for k, v in sliders.items()})
@@ -98,6 +114,7 @@ def live_clicks(fig, update, ax, shape, hover_ax=None, hover_shape=None, **slide
     calls update(hover=[row, col]), and hover=None once the mouse leaves it.
     Pass ax=None, shape=None for hover only (update then gets no click argument)."""
     sid = uuid.uuid4().hex
+    update = _pinned(update)
     _LIVE[sid] = (fig, update)
     plt.close(fig)
     extra = {}

@@ -1740,12 +1740,12 @@ S = P * G                      # -> colour images of 128x128 pixels
 
 COL = {'red': (0.95, 0.10, 0.10), 'yellow': (1.0, 0.85, 0.05), 'green': (0.10, 0.85, 0.55)}
 OFF, BOX, SKY = (0, 0, 0), (0.2, 0.2, 0.2), (0.45, 0.62, 0.85)
-LAMP, GAP = 8, 24              # lamp radius and distance between lamps (in pixels)
+LAMP, GAP = 8, 24              # lamp radius and usual distance between lamps (in pixels)
 
-def traffic_light(img, x, y, lamps, horizontal=False):
+def traffic_light(img, x, y, lamps, gap=GAP, horizontal=False):
     """Draw a traffic light whose first lamp is centred at pixel (x, y).
-    lamps: [(colour, on), ...] from top to bottom (or left to right)."""
-    dx, dy = (GAP, 0) if horizontal else (0, GAP)
+    lamps: [(colour, on), ...] from top to bottom (or left to right), gap pixels apart."""
+    dx, dy = (gap, 0) if horizontal else (0, gap)
     n = len(lamps)
     m = LAMP + 4                                                   # housing margin
     img[y + (n - 1)*dy // 2:, x + (n - 1)*dx // 2 - 2:x + (n - 1)*dx // 2 + 2] = BOX   # pole
@@ -1763,15 +1763,15 @@ def scene(*lights):
     return img
 
 ALL_ON = [('red', 1), ('yellow', 1), ('green', 1)]
-SCENES = [
+SCENES = [                     # lights of different sizes: the distance must not matter
     scene((37, 19, ALL_ON)),                                          # the right order
-    scene((86, 30, [('red', 1), ('yellow', 1), ('green', 0)])),       # green is off
-    scene((69, 27, ALL_ON[::-1])),                                    # upside down
-    scene((29, 35, ALL_ON, True)),                                    # sideways
+    scene((86, 22, [('red', 1), ('yellow', 1), ('green', 0)], 32)),   # green is off
+    scene((69, 33, ALL_ON[::-1], 18)),                                # upside down
+    scene((29, 35, ALL_ON, GAP, True)),                               # sideways
     scene((22, 20, [('red', 1), ('yellow', 0), ('green', 0)]),        # red, but in
           (94, 50, [('red', 0), ('yellow', 1), ('green', 1)])),       #   another light
     scene((22, 20, [('red', 0), ('yellow', 1), ('green', 0)]),
-          (90, 42, ALL_ON)),                                          # the right order
+          (90, 22, ALL_ON, 36)),                                      # right order, tall
 ]
 ANSWERS = ['yes', 'no', 'no', 'no', 'no', 'yes']
 
@@ -1963,6 +1963,217 @@ def update(hover, scene):
               f'red above? {"yes" if verdicts[0] else "no"}   green below? {"yes" if verdicts[1] else "no"}'
         color = 'tab:blue'
     fig.supxlabel(msg, fontsize=22, color=color)
+
+live_clicks(fig, update, None, None, hover_ax=img_ax, hover_shape=(G, G),
+            scene=(0, len(SCENES) - 1, 0, 1))
+```
+
+## Every patch becomes a vector: a token
+
+```{.python data-live="true" data-out-ratio="1.8" data-autorun="true"}
+# a token = one vector per patch:   WHAT it sees   +   WHERE it is
+NAMES = list(KERNELS)                 # ['red', 'yellow', 'green']
+D = 3 + G + G                         # 3 colours + 16 rows + 16 columns = 35 numbers
+
+def tokens(img):
+    """All tokens of an image: one row per patch -> a 256 x 35 matrix."""
+    det = detect(img)
+    X = np.zeros((G, G, D))
+    for k, name in enumerate(NAMES):
+        X[..., k] = det[name] / VMAX              # what:  colour scores, scaled to 0 ... 1
+    r, c = np.mgrid[0:G, 0:G]
+    X[r, c, 3 + r] = 1                            # where: "I am in row r"
+    X[r, c, 3 + G + c] = 1                        #        "I am in column c"
+    return X.reshape(G * G, D)
+
+def show_vector(ax, v, title=''):
+    """Draw a 35-number vector as a strip of cells: colours | row | column."""
+    v = np.asarray(v, float)
+    cells = np.ones((1, D, 3)) * 0.12
+    for k, name in enumerate(NAMES):                      # colour cells glow in their colour
+        cells[0, k] = np.clip(v[k], 0, 1) * np.array(COL[name]) + 0.12 * (1 - np.clip(v[k], 0, 1))
+    cells[0, 3:] += np.clip(v[3:], 0, 1)[:, None] * 0.88  # position cells glow white
+    ax.imshow(cells, extent=(0, D, 1, 0), interpolation='nearest')
+    for t in range(1, D):
+        ax.axvline(t, color='0.4', lw=0.5)
+    for t in (3, 3 + G):
+        ax.axvline(t, color='tab:blue', lw=3)
+    for k, x in enumerate(v):
+        if abs(x) > 0.05:
+            ax.text(k + 0.5, 0.5, f'{x:.2g}', ha='center', va='center', fontsize=11,
+                    color='black' if (k >= 3 or x > 0.5) else 'white')
+    ax.set_yticks([])
+    ax.set_xticks([1.5, 3 + G / 2, 3 + G + G / 2], ['colour', 'row 0 … 15', 'column 0 … 15'],
+                  fontsize=14)
+    ax.tick_params(length=0)
+    ax.set_title(title, fontsize=16)
+
+fig = plt.figure(figsize=(15, 6.2), constrained_layout=True)
+gs = fig.add_gridspec(2, 2, width_ratios=[1, 2.1], height_ratios=[1, 1])
+img_ax = fig.add_subplot(gs[:, 0])
+vec_ax = fig.add_subplot(gs[0, 1])
+txt_ax = fig.add_subplot(gs[1, 1]); txt_ax.axis('off')
+
+def update(hover, scene):
+    img = SCENES[scene]
+    X = tokens(img)
+    img_ax.clear(); vec_ax.clear(); txt_ax.clear(); txt_ax.axis('off')
+    show_image(img_ax, img, f'image {scene}  (hover a patch)', grid=True)
+    if hover is None:
+        show_vector(vec_ax, np.zeros(D), 'token of patch (?, ?)')
+        fig.supxlabel('256 patches  →  256 tokens of 35 numbers each', fontsize=20, color='0.5')
+        return
+    r, c = hover
+    img_ax.add_patch(Rectangle((c, r), 1, 1, fill=False, ec='white', lw=4))
+    show_vector(vec_ax, X[r * G + c], f'token of patch ({r}, {c})')
+    red, yellow, green = (round(x, 2) + 0 for x in X[r * G + c, :3])     # + 0: no "-0.00"
+    txt_ax.text(0.0, 0.85, f'what:   red {red:.2f}   yellow {yellow:.2f}   green {green:.2f}'
+                '      (the CNN from before)', fontsize=17, va='top')
+    txt_ax.text(0.0, 0.55, f'where:  row {r},  column {c}      (written into the token itself)',
+                fontsize=17, va='top')
+    txt_ax.text(0.0, 0.25, 'Adding up tokens no longer forgets the position:\n'
+                'it is part of every token.', fontsize=17, va='top', color='tab:blue')
+    fig.supxlabel(f'patch ({r}, {c})  →  token  (35 numbers)', fontsize=20, color='tab:blue')
+
+live_clicks(fig, update, None, None, hover_ax=img_ax, hover_shape=(G, G),
+            scene=(0, len(SCENES) - 1, 0, 1))
+```
+
+## Asking a question: query · key
+
+```{.python data-live="true" data-out-ratio="1.8" data-autorun="true"}
+def question(colour, where):
+    """The query maker for: 'is there something <colour> anywhere <where> me?'
+    query = W_Q @ token + b_Q   (a plain linear layer, like in the MLP)"""
+    other, mine = np.mgrid[0:G, 0:G]             # row (column) asked about, my row (column)
+    W_Q, b_Q = np.zeros((D, D)), np.zeros(D)
+    W_Q[3:3+G, 3:3+G] = other < mine if where == 'above' else other > mine   # ANY row above me
+    W_Q[3+G:, 3+G:] = abs(other - mine) <= 1     # in my column, give or take one
+    b_Q[NAMES.index(colour)] = 0.5               # and the colour I am looking for
+    return W_Q, b_Q
+
+def softmax(s, axis=-1):
+    """Scores -> percentages that add up to 100%. The largest score gets the most."""
+    e = np.exp(s - s.max(axis=axis, keepdims=True))
+    return e / e.sum(axis=axis, keepdims=True)
+
+RED_ABOVE = question('red', 'above')
+
+fig = plt.figure(figsize=(15, 7.2), constrained_layout=True)
+gs = fig.add_gridspec(3, 3, height_ratios=[5, 0.55, 0.55])
+img_ax, sc_ax, at_ax = (fig.add_subplot(gs[0, k]) for k in range(3))
+q_ax, k_ax = fig.add_subplot(gs[1, :]), fig.add_subplot(gs[2, :])
+
+def label_strips():
+    q_ax.set_ylabel('query', fontsize=15, rotation=0, ha='right', va='center')
+    k_ax.set_ylabel('key', fontsize=15, rotation=0, ha='right', va='center')
+    q_ax.set_xticks([])
+
+def update(hover, scene, sharpness):
+    img = SCENES[scene]
+    X = tokens(img)
+    for ax in (img_ax, sc_ax, at_ax, q_ax, k_ax):
+        ax.clear()
+    show_image(img_ax, img, f'image {scene}  (hover: this patch asks)', grid=True)
+    if hover is None:
+        for ax, t in ((sc_ax, 'score = query · key'), (at_ax, 'attention = softmax(score)')):
+            show_map(ax, np.zeros((G, G)), 'gray', t)
+        show_vector(q_ax, np.zeros(D)); show_vector(k_ax, np.zeros(D))
+        label_strips()
+        fig.supxlabel('"Is there something red anywhere above me?"   hover a patch to ask',
+                      fontsize=20, color='0.5')
+        return
+
+    r, c = hover
+    i = r * G + c
+    W_Q, b_Q = RED_ABOVE
+    q = W_Q @ X[i] + b_Q                       # my question, as a vector
+    K = X                                      # every patch's key: simply its token
+    scores = K @ q                             # one dot product per patch
+    attn = softmax(sharpness * scores)
+
+    ax = sc_ax
+    ax.imshow(scores.reshape(G, G), cmap='magma', vmin=0, vmax=2.5,
+              extent=(0, G, G, 0), interpolation='nearest')
+    ax.set_xticks([]); ax.set_yticks([])
+    ax.set_title('score = query · key', fontsize=15)
+    show_map(at_ax, attn.reshape(G, G) / attn.max() * VMAX, 'gray', 'attention = softmax(score)')
+    for ax in (img_ax, sc_ax, at_ax):
+        ax.add_patch(Rectangle((c, r), 1, 1, fill=False, ec='tab:blue', lw=3))
+
+    best = int(attn.argmax())
+    for j in np.argsort(attn)[::-1][:6]:       # arrows: who do I listen to?
+        if attn[j] > 0.05:
+            img_ax.annotate('', xy=(c + .5, r + .5), xytext=(j % G + .5, j // G + .5),
+                            arrowprops=dict(arrowstyle='->', color='white', lw=3,
+                                            alpha=float(min(1, 2 * attn[j] + 0.2))))
+    show_vector(q_ax, q); show_vector(k_ax, X[best])
+    label_strips()
+    if attn[best] > 0.5:
+        msg = f'patch ({r}, {c}) listens {attn[best]:.0%} to patch ({best // G}, {best % G})'
+    else:
+        msg = f'patch ({r}, {c}) listens to {np.sum(attn > attn[best] / 2)} patches equally'
+    fig.supxlabel(msg, fontsize=20, color='tab:blue')
+
+live_clicks(fig, update, None, None, hover_ax=img_ax, hover_shape=(G, G),
+            scene=(0, len(SCENES) - 1, 0, 1), sharpness=(0, 40, 20, 2))
+```
+
+## The answer: values, and two questions at once
+
+```{.python data-live="true" data-out-ratio="1.8" data-autorun="true"}
+HEADS = {                                         # one "head" per question
+    'red above':   question('red',   'above'),
+    'green below': question('green', 'below'),
+}
+SHARP = 20
+
+def head_output(X, i, W_Q, b_Q):
+    """Patch i asks; every patch j answers with its value v_j = its colours (red, yellow, green)."""
+    attn = softmax(SHARP * (X @ (W_Q @ X[i] + b_Q)))
+    V = X[:, :3]                                  # value = what I tell you: my colours
+    return attn, attn @ V                         # weighted average of the answers
+
+fig = plt.figure(figsize=(15, 6.4), constrained_layout=True)
+gs = fig.add_gridspec(1, 4, width_ratios=[1, 1, 1, 1.05])
+img_ax, *att_axes, bar_ax = (fig.add_subplot(gs[k]) for k in range(4))
+
+def update(hover, scene):
+    img = SCENES[scene]
+    X = tokens(img)
+    for ax in (img_ax, *att_axes, bar_ax):
+        ax.clear()
+    show_image(img_ax, img, f'image {scene}  (hover a patch)', grid=True)
+    bar_ax.set_ylim(0, 1.05); bar_ax.set_box_aspect(1)
+    bar_ax.set_title('what this patch knows now', fontsize=15)
+    bar_ax.set_xticks(range(3), ['me:\nyellow', 'above:\nred', 'below:\ngreen'], fontsize=14)
+    if hover is None:
+        for ax, name in zip(att_axes, HEADS):
+            show_map(ax, np.zeros((G, G)), 'gray', f'head "{name}"')
+        fig.supxlabel('hover a patch: both heads ask at the same time', fontsize=20, color='0.5')
+        return
+
+    r, c = hover
+    i = r * G + c
+    got = [X[i, 1]]                               # my own token: am I yellow?
+    for ax, (name, (W_Q, b_Q)), want, arrow in zip(att_axes, HEADS.items(),
+                                                   ('red', 'green'), ('tab:red', 'tab:green')):
+        attn, out = head_output(X, i, W_Q, b_Q)
+        show_map(ax, attn.reshape(G, G) / attn.max() * VMAX, 'gray', f'head "{name}"')
+        ax.add_patch(Rectangle((c, r), 1, 1, fill=False, ec='tab:blue', lw=3))
+        j = int(attn.argmax())
+        if attn[j] > 0.5:                            # an arrow only if it found something
+            img_ax.annotate('', xy=(c + .5, r + .5), xytext=(j % G + .5, j // G + .5),
+                            arrowprops=dict(arrowstyle='->', color=arrow, lw=4))
+        got.append(out[NAMES.index(want)])           # what this head brought back
+    img_ax.add_patch(Rectangle((c, r), 1, 1, fill=False, ec='white', lw=4))
+
+    bar_ax.bar(range(3), got, color=[COL['yellow'], COL['red'], COL['green']])
+    verdict = round(np.prod(got), 2) + 0
+    ok = verdict > 0.5
+    fig.supxlabel(f'patch ({r}, {c}):   yellow × red above × green below = {verdict:.2f}'
+                  + ('  →  traffic light!' if ok else ''),
+                  fontsize=21, color='tab:green' if ok else 'tab:blue')
 
 live_clicks(fig, update, None, None, hover_ax=img_ax, hover_shape=(G, G),
             scene=(0, len(SCENES) - 1, 0, 1))

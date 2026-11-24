@@ -1,0 +1,21 @@
+(Very roughly sorted by importance)
+
+Residuals:
+    https://www.youtube.com/watch?v=QgH9sr7G13Q
+
+Loss landscapes:
+    https://www.youtube.com/watch?v=NrO20Jb-hy0
+
+Power of depth:
+    https://www.youtube.com/watch?v=qx7hirqgfuU
+
+3Blue1Brown ML series:
+    https://www.youtube.com/watch?v=aircAruvnKk&list=PLZHQObOWTQDNU6R1_67000Dx_ZCJB-3pi
+
+Overfitting - not concerning?:
+    https://www.youtube.com/watch?v=z64a7USuGX0
+
+How to actually find a good model:
+    backprop:
+        https://www.youtube.com/watch?v=VkHfRKewkWw
+        https://www.youtube.com/watch?v=Ilg3gGewQ5U
