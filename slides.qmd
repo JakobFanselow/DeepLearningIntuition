@@ -1321,3 +1321,255 @@ live_sliders(fig, update,
 draw_network(2, 1, hidden=(3,3))
 plt.show()
 ```
+
+# CNNs
+
+## Recognizing a 4×4 smiley
+
+```{.python data-live="true" data-out-ratio="1.8" data-autorun="true"}
+import numpy as np
+import matplotlib.pyplot as plt
+
+# A tiny 4x4 "image":  '*' = black (-1),  '-' = white (1)
+SMILEY = ['*--*',
+          '----',
+          '*--*',
+          '****']
+
+def to_array(rows):
+    return np.array([[-1.0 if ch == '*' else 1.0 for ch in r] for r in rows])
+
+def draw_grid(ax, M, title='', vmin=-1, vmax=1, cmap='gray', numbers=True, fmt='{:g}'):
+    """Draw a small matrix as a grid of cells, optionally labelled with values."""
+    M = np.asarray(M, dtype=float)
+    ax.imshow(M, cmap=cmap, vmin=vmin, vmax=vmax)
+    n, m = M.shape
+    if numbers:
+        for i in range(n):
+            for j in range(m):
+                light = (M[i, j] - vmin) / (vmax - vmin + 1e-12) > 0.55
+                ax.text(j, i, fmt.format(M[i, j]), ha='center', va='center',
+                        fontsize=20, color='black' if light else 'white')
+    ax.set_xticks(np.arange(-.5, m, 1), minor=True)
+    ax.set_yticks(np.arange(-.5, n, 1), minor=True)
+    ax.grid(which='minor', color='0.5', linewidth=1.5)
+    for sp in ax.spines.values():                  # crisp outer border
+        sp.set(color='0.5', linewidth=1.5)
+    ax.set_xticks([]); ax.set_yticks([])
+    ax.tick_params(which='both', length=0)   # hide the minor tick marks
+    ax.set_title(title, fontsize=15)
+
+X = to_array(SMILEY)
+
+fig, axes = plt.subplots(1, 2, figsize=(11, 5.2), constrained_layout=True)
+draw_grid(axes[0], X, 'what we see', numbers=False)
+draw_grid(axes[1], X, 'what the computer sees')
+plt.show()
+```
+
+## A model for it: the smiley itself
+
+```{.python data-live="true" data-out-ratio="1.8" data-autorun="true"}
+X = to_array(SMILEY)          # the image  -- click a pixel to flip it
+W = to_array(SMILEY)          # the model: the very pattern we are looking for
+
+# three grids, with narrow axes in between to hold the * and = signs
+fig, axes = plt.subplots(1, 5, figsize=(13, 4.6), constrained_layout=True,
+                         gridspec_kw={'width_ratios': [4, 1, 4, 1, 4]})
+for k, sym in ((1, '*'), (3, '=')):
+    axes[k].axis('off')
+    axes[k].text(0.5, 0.5, sym, ha='center', va='center', fontsize=34)
+
+def update(click):
+    if click:                             # a pixel of x was clicked: flip it
+        i, j = click
+        X[i, j] *= -1
+
+    P = X * W                             # multiply cell by cell ...
+    score = float(P.sum())                # ... and add it all up
+    assert score == X.flatten() @ W.flatten()      # that *is* the dot product
+
+    for ax in (axes[0], axes[2], axes[4]):
+        ax.clear()
+    draw_grid(axes[0], X, 'image  x   (click a pixel)')
+    draw_grid(axes[2], W, 'model  w')
+    draw_grid(axes[4], P, 'x * w  (cell by cell)')
+    fig.supxlabel(f'score  =  x · w  =  sum(x * w)  =  {score:+.0f}',
+                  fontsize=22, color='tab:blue')
+
+live_clicks(fig, update, axes[0], X.shape)
+```
+
+
+## Now that we have a 4×4 model, how to recognize a smiley in a larger image?
+
+```{.python data-live="true" data-out-ratio="1.8" data-autorun="true"}
+# An 8x8 image of random pixels ... with the smiley hidden in it somewhere
+rng = np.random.default_rng(4)                 # change the seed for another image
+IMAGE = rng.choice([-1.0, 1.0], size=(8, 8))   # -1 = black, 1 = white
+IMAGE[2:6, 3:7] = to_array(SMILEY)             # paste the smiley at row 2, col 3
+
+# width ratios = number of columns, so cells are the same size in both grids
+fig, (ax_image, ax_model) = plt.subplots(1, 2, figsize=(11, 5.2), constrained_layout=True,
+                                         gridspec_kw={'width_ratios': [8, 4]})
+draw_grid(ax_image, IMAGE, 'image  (8×8)', numbers=False)
+draw_grid(ax_model, to_array(SMILEY), 'our model  (4×4)')
+plt.show()
+```
+
+## Slide the model over the image: a convolution
+
+```{.python data-live="true" data-out-ratio="1.8" data-autorun="true"}
+from matplotlib.patches import Rectangle, ConnectionPatch
+
+img = IMAGE.copy()           # the 8x8 image  -- click a pixel to flip it
+kernel = to_array(SMILEY)    # the kernel w: our 4x4 smiley model from before
+k = kernel.shape[0]          # kernel size          (4)
+n = img.shape[0] - k + 1     # positions per axis   (8 - 4 + 1 = 5)
+
+def convolve(img, kernel):
+    """Slide kernel over img: at every position, the same dot product as before."""
+    k = kernel.shape[0]
+    n = img.shape[0] - k + 1
+    out = np.zeros((n, n))
+    for i in range(n):
+        for j in range(n):
+            out[i, j] = np.sum(img[i:i+k, j:j+k] * kernel)
+    return out
+
+# image * kernel = feature map  (width ratios keep all cells the same size)
+fig, panels = plt.subplots(1, 5, figsize=(15, 5.2), constrained_layout=True,
+                           gridspec_kw={'width_ratios': [8, 1.5, 4, 1.5, 5]})
+for a, sym in ((1, '*'), (3, '=')):
+    panels[a].axis('off')
+    panels[a].text(0.5, 0.5, sym, ha='center', va='center', fontsize=34)
+
+# colour = alignment:  blue = no match ... yellow = perfect match  (-16 ... +16)
+CMAP, LIM = 'viridis', k * k
+cbar = fig.colorbar(plt.cm.ScalarMappable(plt.Normalize(-LIM, LIM), CMAP),
+                    ax=panels[4], shrink=0.75, ticks=[-LIM, -LIM // 2, 0, LIM // 2, LIM])
+cbar.set_label('alignment', fontsize=15)
+cbar.ax.tick_params(labelsize=13)
+
+HL = 'crimson'                 # highlight colour
+links = []                     # lines from the image region to the kernel
+
+def update(click, hover):
+    if click:                  # a pixel of the image was clicked: flip it
+        i, j = click
+        img[i, j] *= -1
+    out = convolve(img, kernel)
+
+    for a in (0, 2, 4):
+        panels[a].clear()
+    for l in links:
+        l.remove()
+    links.clear()
+    draw_grid(panels[0], img, 'image  (click a pixel)', numbers=False)
+    draw_grid(panels[2], kernel, 'kernel  w')
+    draw_grid(panels[4], out, 'feature map  (hover me)', vmin=-LIM, vmax=LIM, cmap=CMAP)
+
+    if hover is None:
+        fig.supxlabel('hover over the feature map to see where a value comes from',
+                      fontsize=20, color='0.5')
+        return
+
+    i, j = hover               # out[i, j] = sum(img[i:i+k, j:j+k] * kernel)
+    box = dict(fill=False, ec=HL, lw=5, clip_on=False)
+    panels[0].add_patch(Rectangle((j - .5, i - .5), k, k, **box))   # the region
+    panels[2].add_patch(Rectangle((-.5, -.5), k, k, **box))         # the kernel
+    panels[4].add_patch(Rectangle((j - .5, i - .5), 1, 1, **box))   # the result
+    for y in (-.5, k - .5):    # top / bottom corners: region (right)  ->  kernel (left)
+        links.append(fig.add_artist(ConnectionPatch(
+            (j + k - .5, i + y), (-.5, y), 'data', 'data',
+            axesA=panels[0], axesB=panels[2], color=HL, lw=2.5)))
+    fig.supxlabel(f'feature map[{i}, {j}]  =  sum(region * w)  =  {out[i, j]:+.0f}',
+                  fontsize=22, color='tab:blue')
+
+live_clicks(fig, update, panels[0], img.shape, hover_ax=panels[4], hover_shape=(n, n))
+```
+
+## Another kernel: an edge detector
+
+```{.python data-live="true" data-out-ratio="1.8" data-autorun="true"}
+from matplotlib.patches import Rectangle, ConnectionPatch
+
+SIZE = 64                      # <-- image resolution (SIZE x SIZE pixels)
+
+# a simple drawn scene in grayscale:  -1 = black ... 1 = white
+y, x = np.mgrid[0:SIZE, 0:SIZE] / SIZE                       # coordinates from 0 to 1
+SCENE = np.full((SIZE, SIZE), 0.4)                           # sky
+SCENE[y >= 0.8] = -0.3                                       # ground
+SCENE[(y - 0.2)**2 + (x - 0.78)**2 < 0.11**2] = 1.0          # sun
+SCENE[(y >= 0.47) & (y < 0.8) & (x >= 0.12) & (x < 0.52)] = -0.1          # house wall
+SCENE[(y >= 0.25) & (y < 0.47) & (abs(x - 0.32) < (y - 0.25) * 1.1)] = -0.8   # roof
+SCENE[(y >= 0.6) & (y < 0.8) & (x >= 0.26) & (x < 0.37)] = -1.0          # door
+SCENE[(y >= 0.53) & (y < 0.63) & (x >= 0.41) & (x < 0.48)] = 1.0         # window
+SCENE[(y >= 0.62) & (y < 0.8) & (x >= 0.73) & (x < 0.78)] = -0.9         # tree trunk
+SCENE[(y - 0.52)**2 + (x - 0.755)**2 < 0.12**2] = -0.5                    # tree crown
+
+# vertical edge detector: "right side minus left side"
+#   dark -> light (left to right)  =  high (yellow)
+#   light -> dark                  =  low  (blue)
+#   no change / horizontal edges   =  0
+EDGE = np.array([[-1, 0, 1],
+                 [-1, 0, 1],
+                 [-1, 0, 1]], dtype=float)
+# try EDGE.T for horizontal edges
+
+def show_edges(img, kernel):
+    k = kernel.shape[0]                    # kernel size         (3)
+    n = img.shape[0] - k + 1               # positions per axis  (64 - 3 + 1 = 62)
+    out = convolve(img, kernel)            # the whole feature map at once
+    LIM = np.abs(out).max()                # colour scale: the strongest edge in the image
+
+    # image * kernel = feature map  (the kernel is drawn much larger than to scale)
+    fig, panels = plt.subplots(1, 5, figsize=(15, 5.6), constrained_layout=True,
+                               gridspec_kw={'width_ratios': [5, 0.8, 2.2, 0.8, 5.6]})
+    for a, sym in ((1, '*'), (3, '=')):
+        panels[a].axis('off')
+        panels[a].text(0.5, 0.5, sym, ha='center', va='center', fontsize=34)
+
+    panels[0].imshow(img, cmap='gray', vmin=-1, vmax=1)
+    panels[0].set_title(f'image  ({SIZE}×{SIZE})', fontsize=15)
+    draw_grid(panels[2], kernel, 'kernel  w')
+    fmap = panels[4].imshow(out, cmap='viridis', vmin=-LIM, vmax=LIM)
+    panels[4].set_title(f'feature map  ({n}×{n}, hover me)', fontsize=15)
+    for a in (0, 4):
+        panels[a].set_xticks([]); panels[a].set_yticks([])
+
+    # colour = alignment:  blue = light -> dark edge ... yellow = dark -> light edge
+    cbar = fig.colorbar(fmap, ax=panels[4], shrink=0.75)
+    cbar.set_label('alignment', fontsize=15)
+    cbar.ax.tick_params(labelsize=13)
+
+    HL = 'crimson'                         # highlight colour
+    marks = []                             # highlight artists for the hovered cell
+
+    def update(hover):                     # only the highlight changes: no full redraw
+        for m in marks:
+            m.remove()
+        marks.clear()
+        if hover is None:
+            fig.supxlabel('hover over the feature map to see where a value comes from',
+                          fontsize=20, color='0.5')
+            return
+
+        i, j = hover                       # out[i, j] = sum(img[i:i+k, j:j+k] * kernel)
+        box = dict(fill=False, ec=HL, lw=2.5, clip_on=False)
+        marks.append(panels[0].add_patch(Rectangle((j - .5, i - .5), k, k, **box)))   # region
+        marks.append(panels[2].add_patch(Rectangle((-.5, -.5), k, k, **box)))         # kernel
+        marks.append(panels[4].add_patch(Rectangle((j - .5, i - .5), 1, 1, **box)))   # result
+        marks[1].set_linewidth(5)                                                    # (big)
+        for y in (-.5, k - .5):            # region (right corners)  ->  kernel (left corners)
+            marks.append(fig.add_artist(ConnectionPatch(
+                (j + k - .5, i + y), (-.5, y), 'data', 'data',
+                axesA=panels[0], axesB=panels[2], color=HL, lw=2)))
+        fig.supxlabel(f'feature map[{i}, {j}]  =  sum(region * w)  =  {out[i, j]:+.2f}',
+                      fontsize=22, color='tab:blue')
+
+    # hover only: there is no pixel clicking on this slide
+    live_clicks(fig, update, None, None, hover_ax=panels[4], hover_shape=(n, n))
+
+show_edges(SCENE, EDGE)
+```

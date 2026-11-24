@@ -86,6 +86,38 @@ def live_sliders(fig, update, **sliders):
             for k, v in sliders.items()]
     display({"application/x-live": {"id": sid, "sliders": spec, "frame": _png(fig)}}, raw=True)
 
+def _axbox(fig, ax):
+    """Where ax sits in the rendered PNG: (x0, y0, x1, y1) as fractions from bottom-left."""
+    bb = ax.get_window_extent().transformed(fig.transFigure.inverted())
+    return [float(bb.x0), float(bb.y0), float(bb.x1), float(bb.y1)]
+
+def live_clicks(fig, update, ax, shape, hover_ax=None, hover_shape=None, **sliders):
+    """Like live_sliders, plus: clicking cell (row, col) of the image drawn in ax
+    (shape = (rows, cols)) calls update(click=[row, col]); redraws pass click=None.
+    Optionally, hovering over cell (row, col) of hover_ax (hover_shape = (rows, cols))
+    calls update(hover=[row, col]), and hover=None once the mouse leaves it.
+    Pass ax=None, shape=None for hover only (update then gets no click argument)."""
+    sid = uuid.uuid4().hex
+    _LIVE[sid] = (fig, update)
+    plt.close(fig)
+    extra = {}
+    if ax is not None:
+        extra["click"] = None
+    if hover_ax is not None:
+        extra["hover"] = None
+    update(**extra, **{k: v[2] for k, v in sliders.items()})
+    spec = [dict(name=k, min=v[0], max=v[1], value=v[2], step=v[3])
+            for k, v in sliders.items()]
+    frame = _png(fig)          # draws the figure, so _axbox below sees the final layout
+    fig.set_layout_engine(None)     # freeze it: later redraws must not move the grids
+    msg = {"id": sid, "sliders": spec, "frame": frame}
+    if ax is not None:
+        msg["grid"] = {"rows": shape[0], "cols": shape[1], "box": _axbox(fig, ax)}
+    if hover_ax is not None:
+        msg["hover"] = {"rows": hover_shape[0], "cols": hover_shape[1],
+                        "box": _axbox(fig, hover_ax)}
+    display({"application/x-live": msg}, raw=True)
+
 def _live_call(sid, payload):
     fig, update = _LIVE[sid]
     update(**json.loads(payload))
@@ -154,7 +186,7 @@ def _live_call(sid, payload):
     wrap.appendChild(img);
 
     const values = {};
-    let busy = false, dirty = false;
+    let busy = false, dirty = false, clickQ = null, hoverCell = null;
 
     const refresh = async () => {
       if (busy) { dirty = true; return; }
@@ -162,7 +194,10 @@ def _live_call(sid, payload):
       try {
         do {
           dirty = false;
-          const payload = JSON.stringify(JSON.stringify(values));
+          const args = { ...values };
+          if (spec.grid) { args.click = clickQ; clickQ = null; }   // one-shot
+          if (spec.hover) args.hover = hoverCell;                  // persists
+          const payload = JSON.stringify(JSON.stringify(args));
           const call = `_live_call(${JSON.stringify(spec.id)}, ${payload})`;
           await exec(ws, call, (m) => {
             const c = m.content;
@@ -178,6 +213,47 @@ def _live_call(sid, payload):
         } while (dirty);
       } finally { busy = false; }
     };
+
+    // map a mouse position on the PNG to a [row, col] cell of grid g (or null)
+    const cellAt = (e, g) => {
+      const r = img.getBoundingClientRect();
+      const [x0, y0, x1, y1] = g.box;
+      const fx = (e.clientX - r.left) / r.width;
+      const fy = 1 - (e.clientY - r.top) / r.height;   // PNG y runs from the bottom
+      if (fx < x0 || fx > x1 || fy < y0 || fy > y1) return null;
+      const clamp = (v, hi) => Math.max(0, Math.min(hi - 1, Math.floor(v)));
+      return [clamp((1 - (fy - y0) / (y1 - y0)) * g.rows, g.rows),
+              clamp((fx - x0) / (x1 - x0) * g.cols, g.cols)];
+    };
+
+    // clickable image: a click on a cell of spec.grid is sent once as `click`
+    if (spec.grid) {
+      img.addEventListener("click", (e) => {
+        const c = cellAt(e, spec.grid);
+        if (!c) return;
+        clickQ = c;
+        refresh();
+      });
+    }
+
+    // hoverable image: the cell under the mouse in spec.hover is sent as `hover`
+    // (only when it changes, so the kernel isn't flooded with redraws)
+    if (spec.hover) {
+      const setHover = (c) => {
+        if (String(c) === String(hoverCell)) return;
+        hoverCell = c;
+        refresh();
+      };
+      img.addEventListener("mousemove", (e) => {
+        const c = cellAt(e, spec.hover);
+        img.style.cursor = c ? "crosshair"
+                         : (spec.grid && cellAt(e, spec.grid)) ? "pointer" : "default";
+        setHover(c);
+      });
+      img.addEventListener("mouseleave", () => setHover(null));
+    } else if (spec.grid) {
+      img.style.cursor = "pointer";
+    }
 
     const box = document.createElement("div");
     box.className = "live-sliders";
