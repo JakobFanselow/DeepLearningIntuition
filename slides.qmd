@@ -1721,3 +1721,249 @@ fig.supxlabel('GELU(img * up) + GELU(img * down) + GELU(img * left) + GELU(img *
               fontsize=18, color='tab:blue')
 plt.show()
 ```
+
+# Vision Transformers
+
+## The traffic-light problem: red above yellow above green?
+
+```{.python data-live="true" data-out-ratio="1.8" data-autorun="true"}
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.patches import Rectangle
+from matplotlib.colors import LinearSegmentedColormap
+from scipy.special import erf
+
+def gelu(x):  return 0.5 * x * (1 + erf(x / np.sqrt(2)))
+
+P, G = 8, 16                   # patches of 8x8 pixels, 16x16 patches per image
+S = P * G                      # -> colour images of 128x128 pixels
+
+COL = {'red': (0.95, 0.10, 0.10), 'yellow': (1.0, 0.85, 0.05), 'green': (0.10, 0.85, 0.55)}
+OFF, BOX, SKY = (0, 0, 0), (0.2, 0.2, 0.2), (0.45, 0.62, 0.85)
+LAMP, GAP = 8, 24              # lamp radius and distance between lamps (in pixels)
+
+def traffic_light(img, x, y, lamps, horizontal=False):
+    """Draw a traffic light whose first lamp is centred at pixel (x, y).
+    lamps: [(colour, on), ...] from top to bottom (or left to right)."""
+    dx, dy = (GAP, 0) if horizontal else (0, GAP)
+    n = len(lamps)
+    m = LAMP + 4                                                   # housing margin
+    img[y + (n - 1)*dy // 2:, x + (n - 1)*dx // 2 - 2:x + (n - 1)*dx // 2 + 2] = BOX   # pole
+    img[y - m:y + (n - 1)*dy + m, x - m:x + (n - 1)*dx + m] = BOX                # housing
+    yy, xx = np.mgrid[0:S, 0:S]
+    for k, (name, on) in enumerate(lamps):
+        lamp = (yy - y - k*dy)**2 + (xx - x - k*dx)**2 < LAMP**2
+        img[lamp] = COL[name] if on else OFF
+
+def scene(*lights):
+    img = np.empty((S, S, 3))
+    img[:] = SKY
+    for light in lights:
+        traffic_light(img, *light)
+    return img
+
+ALL_ON = [('red', 1), ('yellow', 1), ('green', 1)]
+SCENES = [
+    scene((37, 19, ALL_ON)),                                          # the right order
+    scene((86, 30, [('red', 1), ('yellow', 1), ('green', 0)])),       # green is off
+    scene((69, 27, ALL_ON[::-1])),                                    # upside down
+    scene((29, 35, ALL_ON, True)),                                    # sideways
+    scene((22, 20, [('red', 1), ('yellow', 0), ('green', 0)]),        # red, but in
+          (94, 50, [('red', 0), ('yellow', 1), ('green', 1)])),       #   another light
+    scene((22, 20, [('red', 0), ('yellow', 1), ('green', 0)]),
+          (90, 42, ALL_ON)),                                          # the right order
+]
+ANSWERS = ['yes', 'no', 'no', 'no', 'no', 'yes']
+
+def show_image(ax, img, title='', grid=False):
+    """Draw an image so that patch (r, c) covers [c, c+1] x [r, r+1]."""
+    ax.imshow(img, extent=(0, G, G, 0), interpolation='nearest')
+    if grid:
+        for t in range(1, G):
+            ax.axhline(t, color='white', lw=0.6, alpha=0.35)
+            ax.axvline(t, color='white', lw=0.6, alpha=0.35)
+    ax.set_xticks([]); ax.set_yticks([])
+    ax.set_title(title, fontsize=15)
+
+fig, axes = plt.subplots(1, len(SCENES), figsize=(15, 4.6), constrained_layout=True)
+for ax, img, answer in zip(axes, SCENES, ANSWERS):
+    show_image(ax, img)
+    ax.set_title(answer, fontsize=26, color='tab:green' if answer == 'yes' else 'crimson')
+fig.supxlabel('Is there a lit red lamp above a lit yellow lamp above a lit green lamp?',
+              fontsize=20, color='tab:blue')
+plt.show()
+```
+
+## Step 1: a CNN finds the colours, patch by patch
+
+```{.python data-live="true" data-out-ratio="1.8" data-autorun="true"}
+# one 8x8 kernel per colour: the same RGB weights on all 64 pixels, plus a bias
+KERNELS = {                   #           R     G     B       bias
+    'red':    (np.array([ 1.0, -1.2, -1.0]), -4),
+    'yellow': (np.array([ 0.0,  1.0, -1.5]), -4),
+    'green':  (np.array([-1.0,  1.2, -0.4]), -4),
+}
+
+def patch_conv(img, w, b):
+    """Like convolve(), but the kernel jumps a whole patch at a time (stride 8):
+    one score per patch, followed by GELU."""
+    kernel = np.broadcast_to(w, (P, P, 3))          # 8x8 pixels x 3 colour channels
+    out = np.zeros((G, G))
+    for i in range(G):
+        for j in range(G):
+            out[i, j] = np.sum(img[i*P:(i+1)*P, j*P:(j+1)*P] * kernel) + b
+    return gelu(out)
+
+def detect(img):
+    return {name: patch_conv(img, w, b) for name, (w, b) in KERNELS.items()}
+
+VMAX = max(m.max() for img in SCENES for m in detect(img).values())
+CMAPS = {name: LinearSegmentedColormap.from_list(name, ['black', c]) for name, c in COL.items()}
+
+def show_map(ax, M, cmap, title=''):
+    """Draw a GxG map of patch values on the same patch grid as show_image."""
+    ax.imshow(M, cmap=cmap, vmin=0, vmax=VMAX, extent=(0, G, G, 0), interpolation='nearest')
+    for t in range(1, G):
+        ax.axhline(t, color='white', lw=0.6, alpha=0.2)
+        ax.axvline(t, color='white', lw=0.6, alpha=0.2)
+    ax.set_xticks([]); ax.set_yticks([])
+    ax.set_title(title, fontsize=15)
+
+def weights_text(w, b):
+    terms = ''.join(f' {"+" if v >= 0 else "−"} {abs(v):g}{ch}' for v, ch in zip(w, 'RGB') if v)
+    return terms.lstrip(' +').replace('1R', 'R').replace('1G', 'G').replace('1B', 'B') + f'   ({b:+g})'
+
+# image * kernels = feature maps
+fig = plt.figure(figsize=(15, 5.6), constrained_layout=True)
+gs = fig.add_gridspec(1, 5, width_ratios=[5, 0.5, 2.6, 0.5, 8])
+img_ax = fig.add_subplot(gs[0])
+for a, sym in ((1, '*'), (3, '=')):
+    ax = fig.add_subplot(gs[a])
+    ax.axis('off')
+    ax.text(0.5, 0.5, sym, ha='center', va='center', fontsize=34)
+k_axes = [fig.add_subplot(c) for c in gs[2].subgridspec(3, 1)]
+m_axes = [fig.add_subplot(c) for c in gs[4].subgridspec(1, 3)]
+
+for ax, (name, (w, b)) in zip(k_axes, KERNELS.items()):     # the kernels never change
+    ax.imshow(np.broadcast_to(COL[name], (P, P, 3)), extent=(0, P, P, 0))
+    for t in range(1, P):
+        ax.axhline(t, color='black', lw=0.6); ax.axvline(t, color='black', lw=0.6)
+    ax.set_xticks([]); ax.set_yticks([])
+    ax.set_title(weights_text(w, b), fontsize=13)
+
+HL = 'white'
+
+def update(hover, scene):
+    img = SCENES[scene]
+    det = detect(img)
+    for ax in (img_ax, *m_axes):
+        ax.clear()
+    show_image(img_ax, img, f'image {scene}  ({G}×{G} patches, hover me)', grid=True)
+    for ax, name in zip(m_axes, KERNELS):
+        show_map(ax, det[name], CMAPS[name], f'{name} detector')
+
+    if hover is None:
+        fig.supxlabel(f'{P}×{P} kernels, moved {P} pixels at a time: one score per patch and colour',
+                      fontsize=20, color='0.5')
+        return
+    i, j = hover
+    img_ax.add_patch(Rectangle((j, i), 1, 1, fill=False, ec=HL, lw=4))
+    for ax in m_axes:
+        ax.add_patch(Rectangle((j, i), 1, 1, fill=False, ec=HL, lw=3))
+    scores = '    '.join(f'{name} {round(det[name][i, j], 1) + 0:5.1f}' for name in KERNELS)
+    fig.supxlabel(f'patch ({i}, {j}):    {scores}', fontsize=22, color='tab:blue')
+
+live_clicks(fig, update, None, None, hover_ax=img_ax, hover_shape=(G, G),
+            scene=(0, len(SCENES) - 1, 0, 1))
+```
+
+## How do we combine the patches?
+
+```{.python data-live="true" data-out-ratio="1.8" data-autorun="true"}
+def detections_rgb(det):
+    """One picture of what the CNN found: every patch painted in the colours it detected."""
+    rgb = sum(np.clip(det[name] / VMAX, 0, 1)[..., None] * np.array(COL[name]) for name in det)
+    return np.clip(rgb, 0, 1)
+
+PICK = [0, 2, 3]               # same lamps lit ... but in different places
+fig, axes = plt.subplots(2, len(PICK), figsize=(15, 7.6), constrained_layout=True)
+for col, s in enumerate(PICK):
+    det = detect(SCENES[s])
+    show_image(axes[0, col], SCENES[s])
+    axes[0, col].set_title(f'answer: {ANSWERS[s]}', fontsize=20,
+                           color='tab:green' if ANSWERS[s] == 'yes' else 'crimson')
+    show_image(axes[1, col], detections_rgb(det), grid=True)
+    totals = '   '.join(f'{name}: {det[name].sum():.0f}' for name in det)
+    axes[1, col].set_title(f'sum over all patches\n{totals}', fontsize=15)
+
+fig.supxlabel('Every patch only knows its own colour. Adding them up loses WHERE they are.',
+              fontsize=20, color='tab:blue')
+plt.show()
+```
+
+## Idea: let the patches ask each other questions
+
+```{.python data-live="true" data-out-ratio="1.8" data-autorun="true"}
+QUESTIONS = [                  # (colour I am looking for, where)
+    ('red',   'above'),
+    ('green', 'below'),
+]
+YES = 0.5                      # an answer counts as "yes" above this
+
+def region(r, c, where):
+    """The patches 'above' or 'below' patch (r, c): further up / down,
+    at most one column to the side (the lights don't sit exactly on the patch grid)."""
+    rows, cols = np.mgrid[0:G, 0:G]
+    return (rows < r if where == 'above' else rows > r) & (abs(cols - c) <= 1)
+
+def ask(det, r, c, colour, where):
+    """Patch (r, c) asks every patch: 'are you <colour> and <where> me?'"""
+    return det[colour] * region(r, c, where)    # only patches in the right place may answer
+
+fig, (img_ax, *ans_axes) = plt.subplots(1, 3, figsize=(15, 6.6), constrained_layout=True)
+
+def update(hover, scene):
+    img = SCENES[scene]
+    det = detect(img)
+    for ax in (img_ax, *ans_axes):
+        ax.clear()
+    show_image(img_ax, img, f'image {scene}  (hover a patch: it asks)', grid=True)
+
+    verdicts = []
+    for ax, (colour, where) in zip(ans_axes, QUESTIONS):
+        answers = np.zeros((G, G)) if hover is None else ask(det, *hover, colour, where)
+        show_map(ax, answers, 'gray', f'"Is there a {colour} patch {where} me?"')
+        ax.title.set_fontsize(17)
+        ax.set_xlabel(' ', fontsize=22)      # keeps room for the answer (layout is fixed)
+        if hover is None:
+            continue
+
+        r, c = hover
+        ax.add_patch(Rectangle((c, r), 1, 1, fill=False, ec='tab:blue', lw=3))
+        for i, j in zip(*np.nonzero(region(r, c, where))):    # shade where it looks
+            img_ax.add_patch(Rectangle((j, i), 1, 1, fc='white', alpha=0.2, lw=0))
+        for i, j in zip(*np.nonzero(answers > YES)):          # arrows: who says "yes"?
+            img_ax.annotate('', xy=(c + .5, r + .5), xytext=(j + .5, i + .5),
+                            arrowprops=dict(arrowstyle='->', color='white', lw=3,
+                                            alpha=min(1, answers[i, j] / VMAX + 0.3)))
+        verdicts.append(answers.max() > YES)
+        ax.set_xlabel('yes' if verdicts[-1] else 'no', fontsize=22)
+
+    if hover is None:
+        fig.supxlabel('hover over a patch to let it ask both questions',
+                      fontsize=20, color='0.5')
+        return
+    r, c = hover
+    img_ax.add_patch(Rectangle((c, r), 1, 1, fill=False, ec='white', lw=4))
+    yellow = det['yellow'][r, c] > YES
+    if yellow and all(verdicts):
+        msg, color = 'yellow, red above, green below  →  a traffic light in the right order!', 'tab:green'
+    else:
+        msg = f'patch ({r}, {c}):  yellow? {"yes" if yellow else "no"}   ' \
+              f'red above? {"yes" if verdicts[0] else "no"}   green below? {"yes" if verdicts[1] else "no"}'
+        color = 'tab:blue'
+    fig.supxlabel(msg, fontsize=22, color=color)
+
+live_clicks(fig, update, None, None, hover_ax=img_ax, hover_shape=(G, G),
+            scene=(0, len(SCENES) - 1, 0, 1))
+```
