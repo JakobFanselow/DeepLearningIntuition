@@ -1,6 +1,6 @@
 ---
-title: "ML Demo"
-author: "You"
+title: "Deep Learning"
+author: "Jakob"
 format:
   revealjs:
     theme: dark
@@ -55,7 +55,7 @@ plt.figure(figsize=(8, 6))
 plt.scatter(x.numpy(), y.numpy(), color='royalblue', alpha=0.7, edgecolors='k', label='Data Points')
 
 x_line = torch.linspace(0, 10, 100).unsqueeze(1)
-y_line = (true_w+0.05) * (x_line) + (true_b)
+y_line = 1.97 * x_line + 1.62
 plt.plot(x_line.numpy(), y_line.numpy(), color='crimson', linewidth=2.5, label=f'Line')
 
 
@@ -85,11 +85,11 @@ plt.figure(figsize=(8, 6))
 plt.scatter(x.numpy(), y.numpy(), color='royalblue', alpha=0.7, edgecolors='k', label='Data Points')
 
 x_line = torch.linspace(0, 10, 100).unsqueeze(1)
-y_line = (true_w+0.05) * (x_line) + (true_b)
+y_line = 1.97 * x_line + 1.62
 plt.plot(x_line.numpy(), y_line.numpy(), color='crimson', linewidth=2.5, label=f'Line 1')
 
 x_line = torch.linspace(0, 10, 100).unsqueeze(1)
-y_line = (true_w-0.1) * (x_line) + (true_b+0.8)
+y_line = 1.85 * x_line + 1.66
 plt.plot(x_line.numpy(), y_line.numpy(), color='green', linewidth=2.5, label=f'Line 2')
 
 
@@ -119,11 +119,11 @@ plt.figure(figsize=(8, 6))
 plt.scatter(x.numpy(), y.numpy(), color='royalblue', alpha=0.7, edgecolors='k', label='Data Points')
 
 x_line = torch.linspace(0, 10, 100).unsqueeze(1)
-y_line = (true_w+0.05) * (x_line) + (true_b)
+y_line = 1.97 * x_line + 1.62
 plt.plot(x_line.numpy(), y_line.numpy(), color='crimson', linewidth=2.5, label=f'Line 1')
 
 x_line = torch.linspace(0, 10, 100).unsqueeze(1)
-y_line = (true_w-0.1) * (x_line) + (true_b+0.8)
+y_line = 1.85 * x_line + 1.66
 plt.plot(x_line.numpy(), y_line.numpy(), color='green', linewidth=2.5, label=f'Line 2')
 
 
@@ -153,14 +153,15 @@ x = torch.rand(num_datapoints, 1) * 10
 y = true_w * x + true_b + torch.randn_like(x) * 2.0
 xs, ys = x.numpy().flatten(), y.numpy().flatten()
 
-lines = {'Line 1': (true_w + 0.05, true_b),
-         'Line 2': (true_w - 0.1,  true_b + 0.8)}
+lines = {'Line 1': (1.97, 1.62),
+         'Line 2': (1.85, 1.66)}
 
 # shared color scale so both panels are comparable
 vmax = max(np.abs(ys - (w * xs + b)).max() for w, b in lines.values())
 norm = Normalize(0, vmax)
 
 fig, axes = plt.subplots(1, 2, figsize=(14, 6), sharey=True)
+fig.subplots_adjust(bottom=0.17)          # room for the verdict line below
 for ax, (name, (w, b)), c in zip(axes, lines.items(), ['crimson', 'limegreen']):
     pred = w * xs + b
     err = np.abs(ys - pred)
@@ -181,6 +182,12 @@ for ax, (name, (w, b)), c in zip(axes, lines.items(), ['crimson', 'limegreen']):
 
 axes[0].set_ylabel('y', fontsize=12)
 fig.colorbar(lc, ax=axes, label='|error|', shrink=0.85)
+
+# which line wins depends on how we measure
+mse = {name: np.mean((ys - (w * xs + b)) ** 2) for name, (w, b) in lines.items()}
+mae = {name: np.mean(np.abs(ys - (w * xs + b))) for name, (w, b) in lines.items()}
+fig.supxlabel(f'MSE prefers {min(mse, key=mse.get)}     MAE prefers {min(mae, key=mae.get)}',
+              fontsize=18, color='tab:blue')
 plt.show()
 ```
 
@@ -283,8 +290,8 @@ _per_residual = LOSSES[loss_name]
 def loss_function(w, b):
     return float(np.mean(_per_residual(w * xs + b - ys)))
 
-lines = {'Line 1': (true_w + 0.05, true_b,       'crimson'),
-         'Line 2': (true_w - 0.1,  true_b + 0.8, 'limegreen')}
+lines = {'Line 1': (1.97, 1.62, 'crimson'),
+         'Line 2': (1.85, 1.66, 'limegreen')}
 
 # loss landscape grid (zoom = 1 is this window, larger shows more of the landscape)
 w_c, w_h = 2.0, 3.0          # centre and half-width of the w axis
@@ -2031,8 +2038,9 @@ def update(hover, scene):
                 '      (the CNN from before)', fontsize=17, va='top')
     txt_ax.text(0.0, 0.55, f'where:  row {r},  column {c}      (written into the token itself)',
                 fontsize=17, va='top')
-    txt_ax.text(0.0, 0.25, 'Adding up tokens no longer forgets the position:\n'
-                'it is part of every token.', fontsize=17, va='top', color='tab:blue')
+    txt_ax.text(0.0, 0.25, 'Every patch now knows where it is,\n'
+                'so patches can ask each other about position.', fontsize=17, va='top',
+                color='tab:blue')
     fig.supxlabel(f'patch ({r}, {c})  →  token  (35 numbers)', fontsize=20, color='tab:blue')
 
 live_clicks(fig, update, None, None, hover_ax=img_ax, hover_shape=(G, G),
@@ -2127,6 +2135,9 @@ HEADS = {                                         # one "head" per question
     'green below': question('green', 'below'),
 }
 SHARP = 20
+BIAS = -2.0                                       # the 3 answers must add up to more than 2.
+                                                  # each is at most 1, so two alone never get
+                                                  # there: all three have to be there, at least a bit
 
 def head_output(X, i, W_Q, b_Q):
     """Patch i asks; every patch j answers with its value v_j = its colours (red, yellow, green)."""
@@ -2169,12 +2180,54 @@ def update(hover, scene):
     img_ax.add_patch(Rectangle((c, r), 1, 1, fill=False, ec='white', lw=4))
 
     bar_ax.bar(range(3), got, color=[COL['yellow'], COL['red'], COL['green']])
-    verdict = round(np.prod(got), 2) + 0
-    ok = verdict > 0.5
-    fig.supxlabel(f'patch ({r}, {c}):   yellow × red above × green below = {verdict:.2f}'
-                  + ('  →  traffic light!' if ok else ''),
-                  fontsize=21, color='tab:green' if ok else 'tab:blue')
+    verdict = round(gelu(sum(got) + BIAS), 2) + 0     # one neuron: add up, add the bias, GELU
+    ok = verdict > 0
+    fig.supxlabel(f'patch ({r}, {c}):   GELU(yellow + red above + green below − {-BIAS:g})'
+                  f' = {verdict:.2f}' + ('  →  traffic light!' if ok else ''),
+                  fontsize=19, color='tab:green' if ok else 'tab:blue')
 
 live_clicks(fig, update, None, None, hover_ax=img_ax, hover_shape=(G, G),
             scene=(0, len(SCENES) - 1, 0, 1))
+```
+
+## Every image: GELU(yellow + red above + green below + bias)
+
+```{.python data-live="true" data-out-ratio="1.8" data-autorun="true"}
+def verdicts(img):
+    """All 256 patches ask both questions at the same time. Returns
+    GELU(yellow + red above + green below + BIAS) for every patch, as a 16x16 map."""
+    X = tokens(img)
+    total = X[:, NAMES.index('yellow')]                    # me: am I yellow?
+    for (W_Q, b_Q), want in zip(HEADS.values(), ('red', 'green')):
+        attn = softmax(SHARP * (X @ W_Q.T + b_Q) @ X.T)    # one row per asking patch
+        total = total + (attn @ X[:, :3])[:, NAMES.index(want)]   # + what that head brought back
+    return gelu(total + BIAS).reshape(G, G)                # one neuron per patch
+
+maps = [verdicts(img) for img in SCENES]
+TOP = max(max(V.max() for V in maps), 1e-9)                # strongest patch of all images = yellow
+BLUE_YELLOW = LinearSegmentedColormap.from_list(           # deep blue -> green -> yellow
+    'blue_yellow', ['#081d58', '#21918c', '#5ec962', '#fde725'])
+
+fig, axes = plt.subplots(2, len(SCENES), figsize=(15, 6.6), constrained_layout=True)
+correct = 0
+for col, (img, V, answer) in enumerate(zip(SCENES, maps, ANSWERS)):
+    best = V.max()                                         # the image's answer: its best patch
+    said = 'yes' if best > 0 else 'no'
+    correct += said == answer
+
+    show_image(axes[0, col], img)
+    axes[0, col].set_title(f'should be: {answer}', fontsize=17)
+    show_map(axes[1, col], V / TOP * VMAX, BLUE_YELLOW)    # (show_map's scale runs 0 … VMAX)
+    axes[1, col].set_title(f'{best:.2f}  →  yes' if said == 'yes' else 'all ≤ 0  →  no',
+                           fontsize=18, color='tab:green' if said == answer else 'crimson')
+    if best > 0:                                           # mark the patch that found it
+        r, c = np.unravel_index(V.argmax(), V.shape)
+        axes[0, col].add_patch(Rectangle((c, r), 1, 1, fill=False, ec='white', lw=3))
+
+axes[1, 0].set_ylabel(f'every patch:\nGELU(yellow + red above\n+ green below − {-BIAS:g})',
+                      fontsize=13)
+fig.supxlabel(f'Every patch already knows WHERE, so the best patch answers for the whole image:'
+              f'  {correct} / {len(SCENES)} correct',
+              fontsize=19, color='tab:green' if correct == len(SCENES) else 'tab:blue')
+plt.show()
 ```
