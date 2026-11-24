@@ -1512,14 +1512,13 @@ SCENE[(y - 0.52)**2 + (x - 0.755)**2 < 0.12**2] = -0.5                    # tree
 #   dark -> light (left to right)  =  high (yellow)
 #   light -> dark                  =  low  (blue)
 #   no change / horizontal edges   =  0
-EDGE = np.array([[-1, 0, 1],
-                 [-1, 0, 1],
-                 [-1, 0, 1]], dtype=float)
+EDGE = np.array([[-1, 1],
+                 [-1, 1]], dtype=float)
 # try EDGE.T for horizontal edges
 
 def show_edges(img, kernel):
-    k = kernel.shape[0]                    # kernel size         (3)
-    n = img.shape[0] - k + 1               # positions per axis  (64 - 3 + 1 = 62)
+    k = kernel.shape[0]                    # kernel size         (2)
+    n = img.shape[0] - k + 1               # positions per axis  (64 - 2 + 1 = 63)
     out = convolve(img, kernel)            # the whole feature map at once
     LIM = np.abs(out).max()                # colour scale: the strongest edge in the image
 
