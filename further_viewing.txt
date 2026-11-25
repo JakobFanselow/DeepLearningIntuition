@@ -12,7 +12,7 @@ Power of depth:
 3Blue1Brown ML series:
     https://www.youtube.com/watch?v=aircAruvnKk&list=PLZHQObOWTQDNU6R1_67000Dx_ZCJB-3pi
 
-Overfitting - not concerning?:
+Overfitting - less concerning?:
     https://www.youtube.com/watch?v=z64a7USuGX0
 
 How to actually find a good model:
